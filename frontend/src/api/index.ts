@@ -1,0 +1,11 @@
+export { default as api } from './axios';
+export { authApi } from './auth';
+export { doctorsApi } from './doctors';
+export { appointmentsApi } from './appointments';
+export { patientsApi } from './patients';
+export { medicalRecordsApi } from './medical-records';
+export { paymentsApi } from './payments';
+export { notificationsApi } from './notifications';
+export { adminApi } from './admin';
+export { searchApi } from './search';
+export { feedbackApi } from './feedback';

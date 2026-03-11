@@ -1,0 +1,48 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DROPLET_IP }} >> ~/.ssh/known_hosts
+
+      - name: Sync files to droplet
+        run: |
+          rsync -avz --delete \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude '.env' \
+            --exclude 'backend/node_modules' \
+            --exclude 'frontend/node_modules' \
+            --exclude 'frontend/dist' \
+            --exclude 'backend/dist' \
+            --exclude '.github' \
+            --exclude '*.log' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./ ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }}:/var/www/myapp/
+
+      # Create backend/.env from GitHub secret ENV_FILE (paste full production .env contents).
+      # If you prefer not to use ENV_FILE, remove this step and create backend/.env manually on the server.
+      - name: Create .env on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
+            'cd /var/www/myapp/backend && echo "${{ secrets.ENV_FILE }}" > .env'
+
+      - name: Run deploy script on droplet
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
+            'cd /var/www/myapp && chmod +x scripts/deploy.sh && ./scripts/deploy.sh'

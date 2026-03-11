@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* Pointer cursor for all clickable elements */
+@layer base {
+
+  button,
+  a,
+  [role="button"],
+  input[type="submit"],
+  input[type="button"],
+  input[type="reset"],
+  select,
+  summary,
+  [type="checkbox"],
+  [type="radio"] {
+    cursor: pointer;
+  }
+}
+
+/* Reusable interactive and loading utilities – use these instead of duplicating hover/loading CSS */
+@layer utilities {
+  .interactive-card {
+    @apply transition-all duration-200;
+  }
+
+  .interactive-card:hover {
+    @apply shadow-md -translate-y-0.5;
+  }
+
+  .interactive-btn {
+    @apply transition-all duration-200;
+  }
+
+  .interactive-btn:hover:not(:disabled) {
+    @apply opacity-90 scale-[1.02];
+  }
+
+  .interactive-btn:active:not(:disabled) {
+    @apply scale-[0.98];
+  }
+
+  .link-hover {
+    @apply transition-colors duration-150;
+  }
+
+  .link-hover:hover {
+    @apply opacity-80 underline;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded bg-gray-200;
+  }
+
+  .btn-loading {
+    @apply pointer-events-none opacity-70;
+  }
+
+  .toast-in {
+    animation: toast-in 0.25s ease-out;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

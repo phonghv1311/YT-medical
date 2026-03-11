@@ -1,0 +1,9 @@
+export { Skeleton } from './Skeleton';
+export { CardSkeleton } from './CardSkeleton';
+export { DoctorCardSkeleton } from './DoctorCardSkeleton';
+export { ListRowSkeleton } from './ListRowSkeleton';
+export { TableSkeleton } from './TableSkeleton';
+export { ProfileSkeleton } from './ProfileSkeleton';
+export { DashboardSkeleton } from './DashboardSkeleton';
+export { ProductCardSkeleton } from './ProductCardSkeleton';
+export { FullPageSkeleton } from './FullPageSkeleton';
