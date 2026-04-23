@@ -8,16 +8,19 @@ export const adminApi = {
 
   getUser: (id: number, config?: RequestConfig) => api.get(`/users/${id}`, config),
 
-  createUser: (data: { email: string; password: string; firstName: string; lastName: string; roleId: number; phone?: string; hospitalId?: number; departmentId?: number }) =>
+  createUser: (data: { email: string; password: string; firstName: string; lastName: string; roleId: number; phone?: string; hospitalId?: number; departmentId?: number; specializationIds?: number[] }) =>
     api.post('/users', data),
 
-  updateUser: (id: number, data: { firstName?: string; lastName?: string; isActive?: boolean; roleId?: number }) =>
+  updateUser: (id: number, data: { firstName?: string; lastName?: string; phone?: string; isActive?: boolean; roleId?: number }) =>
     api.put(`/users/${id}`, data),
 
   resetUserPassword: (id: number, newPassword: string) =>
     api.put(`/users/${id}/reset-password`, { newPassword }),
 
   deleteUser: (id: number) => api.delete(`/users/${id}`),
+
+  deactivateUser: (id: number, data: { reason: string }) =>
+    api.put(`/users/${id}/deactivate`, data),
 
   getHospitals: (config?: RequestConfig) => api.get('/hospitals', config),
   getHospital: (id: number, config?: RequestConfig) => api.get(`/hospitals/${id}`, config),
@@ -38,7 +41,8 @@ export const adminApi = {
     doctorIds?: number[];
   }) => api.post('/hospitals', data),
   updateHospital: (id: number, data: Record<string, unknown>) => api.put(`/hospitals/${id}`, data),
-  deleteHospital: (id: number) => api.delete(`/hospitals/${id}`),
+  deleteHospital: (id: number, data: { reason: string }) =>
+    api.delete(`/hospitals/${id}`, { data: data }),
 
   getStaff: (params?: { hospitalId?: number; page?: number; limit?: number }, config?: RequestConfig) =>
     api.get('/staff', { params, ...config }),
@@ -73,7 +77,7 @@ export const adminApi = {
   getDepartments: (hospitalId?: number, config?: RequestConfig) =>
     api.get('/departments', { params: { hospitalId }, ...config }),
   getDepartment: (id: number) => api.get(`/departments/${id}`),
-  createDepartment: (data: { name: string; hospitalId: number; description?: string }) =>
+  createDepartment: (data: { name: string; hospitalId: number; description?: string; headId?: number }) =>
     api.post('/departments', data),
   updateDepartment: (id: number, data: Record<string, unknown>) => api.put(`/departments/${id}`, data),
   deleteDepartment: (id: number) => api.delete(`/departments/${id}`),
@@ -83,7 +87,28 @@ export const adminApi = {
   getRoles: (config?: RequestConfig) => api.get('/roles', config),
   updateRolePermissions: (roleId: number, permissionIds: number[]) =>
     api.put(`/roles/${roleId}/permissions`, { permissionIds }),
+  createRole: (data: { name: string; permissionIds: number[] }) => api.post('/roles', data),
+  deleteRole: (id: number) => api.delete(`/roles/${id}`),
 
   getLogs: (params?: { page?: number; limit?: number; userId?: number; action?: string; resource?: string; resourceId?: number }, config?: RequestConfig) =>
     api.get('/logs', { params, ...config }),
+
+  getPendingDoctors: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-doctors', config),
+  getPendingTransfers: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-transfers', config),
+  getPendingStaff: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-staff', config),
+  getPendingHospitals: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-hospitals', config),
+  getPendingProfiles: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-profiles', config),
+  getPendingResignations: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-resignations', config),
+  getPendingLeave: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-leave', config),
+  getPendingSalaryAdvance: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-salary-advance', config),
+  getPendingAppointments: (config?: RequestConfig) =>
+    api.get<unknown>('/approvals/pending-appointments', config),
 };

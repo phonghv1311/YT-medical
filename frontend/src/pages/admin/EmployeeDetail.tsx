@@ -143,7 +143,7 @@ export default function AdminEmployeeDetail() {
     if (!ok) return;
     try {
       await adminApi.deleteStaff(staff.id);
-      navigate('/admin/employees');
+      navigate('/admin/users?roleTab=staff');
     } catch (err) {
       console.error('Failed to delete staff', err);
     }
@@ -161,7 +161,7 @@ export default function AdminEmployeeDetail() {
     return (
       <div className="p-4">
         <p className="text-gray-500">Employee not found.</p>
-        <Link to="/admin/employees" className="mt-4 inline-block text-blue-600 hover:underline">Back to Employees</Link>
+        <Link to="/admin/users?roleTab=staff" className="mt-4 inline-block text-blue-600 hover:underline">Back to Users</Link>
       </div>
     );
   }
@@ -173,7 +173,7 @@ export default function AdminEmployeeDetail() {
     <div className="min-h-screen bg-gray-50 pb-24">
       <header className="sticky top-0 z-10 bg-white border-b border-gray-200">
         <div className="max-w-lg mx-auto px-4 h-14 flex items-center gap-2">
-          <button type="button" onClick={() => navigate('/admin/employees')} className="p-2 -ml-2 rounded-lg hover:bg-gray-100" aria-label={t('common.back')}>
+          <button type="button" onClick={() => navigate('/admin/users?roleTab=staff')} className="p-2 -ml-2 rounded-lg hover:bg-gray-100" aria-label={t('common.back')}>
             <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </button>
           <h1 className="text-lg font-bold text-gray-900 truncate flex-1">{fullName}</h1>

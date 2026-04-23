@@ -1,37 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { useConfirm } from '../../contexts/ConfirmContext';
 import { adminApi } from '../../api/admin';
 import { doctorsApi } from '../../api/doctors';
+import AddUserModal from '../../components/AddUserModal';
 import type { Hospital, Department, Doctor, User, Staff } from '../../types';
+import { useAppSelector } from '../../hooks/useAppDispatch';
+import { getRole } from '../../utils/auth';
 
-function getHospitalDeleteHandler(hospitalId: number, t: (k: string) => string, confirm: (o: { title: string; message: string; confirmLabel: string; cancelLabel: string; variant: string }) => Promise<boolean>, navigate: (path: string) => void) {
-  return async () => {
-    const ok = await confirm({
-      title: t('admin.deleteHospital'),
-      message: t('admin.deleteHospitalConfirm'),
-      confirmLabel: t('common.delete'),
-      cancelLabel: t('common.cancel'),
-      variant: 'danger',
-    });
-    if (!ok) return;
-    try {
-      await adminApi.deleteHospital(hospitalId);
-      navigate('/admin/hospitals');
-    } catch (err) {
-      console.error('Failed to delete hospital', err);
-    }
-  };
-}
-
-type TabId = 'overview' | 'doctors' | 'departments' | 'staff';
+type TabId = 'overview' | 'people' | 'departments';
+type PeopleRoleFilter = 'all' | 'doctor' | 'staff' | 'customer';
 
 export default function HospitalDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { t } = useLanguage();
-  const { confirm } = useConfirm();
+  const currentUser = useAppSelector((s) => s.auth.user);
+  const role = getRole(currentUser);
+  const canEditHospital = role === 'superadmin';
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
@@ -47,10 +33,25 @@ export default function HospitalDetail() {
   });
   const [activityLogs, setActivityLogs] = useState<{ action: string; resource: string; resourceId?: number; details?: string; createdAt?: string; user?: { firstName?: string; lastName?: string } }[]>([]);
   const [acceptingPatients, setAcceptingPatients] = useState(true);
-  const [deptForm, setDeptForm] = useState({ name: '', description: '' });
+  const [deptForm, setDeptForm] = useState({ name: '', description: '', headId: '' });
   const [saving, setSaving] = useState(false);
   const [usersForHead, setUsersForHead] = useState<User[]>([]);
   const [allDoctorsForSelect, setAllDoctorsForSelect] = useState<Doctor[]>([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [addUserModal, setAddUserModal] = useState(false);
+  const [editDepartmentChips, setEditDepartmentChips] = useState<string[]>([]);
+  const [saveError, setSaveError] = useState('');
+  const [uploadingFile, setUploadingFile] = useState<'records' | 'contract' | 'background' | null>(null);
+  const [peopleRoleFilter, setPeopleRoleFilter] = useState<PeopleRoleFilter>('all');
+  const [peopleDepartmentId, setPeopleDepartmentId] = useState<number | ''>('');
+  const [customersList, setCustomersList] = useState<User[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [doctorSelectOpen, setDoctorSelectOpen] = useState(false);
+  const doctorSelectRef = useRef<HTMLDivElement>(null);
+  const [departmentSelectOpen, setDepartmentSelectOpen] = useState(false);
+  const departmentSelectRef = useRef<HTMLDivElement>(null);
 
   const hospitalId = id ? parseInt(id, 10) : NaN;
 
@@ -62,18 +63,12 @@ export default function HospitalDetail() {
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     setLoading(true);
-    Promise.allSettled([
+    Promise.all([
       adminApi.getHospital(hospitalId, { signal }).then((r) => r.data?.data ?? r.data),
-      adminApi.getDepartments(hospitalId, { signal }).then((r) => (r.data?.data ?? r.data) as Department[]),
-      doctorsApi.getAll({ hospitalId, limit: 50 }, { signal }).then((r) => (r.data?.doctors ?? r.data?.data?.doctors ?? r.data) as Doctor[]),
       adminApi.getStaff({ hospitalId, limit: 100 }, { signal }).then((r) => (r.data?.staff ?? r.data?.data ?? r.data) as Staff[]),
     ])
-      .then(([hospitalResult, deptsResult, docsResult, staffResult]) => {
+      .then(([h, staffRes]) => {
         if (signal.aborted) return;
-        const h = hospitalResult.status === 'fulfilled' ? hospitalResult.value : null;
-        const depts = deptsResult.status === 'fulfilled' && Array.isArray(deptsResult.value) ? deptsResult.value : [];
-        const docs = docsResult.status === 'fulfilled' ? docsResult.value : [];
-        const staffRes = staffResult.status === 'fulfilled' ? staffResult.value : [];
         if (!h || typeof h !== 'object') {
           setHospital(null);
           setDepartments([]);
@@ -81,15 +76,16 @@ export default function HospitalDetail() {
           setStaffList([]);
           return;
         }
+        const hp = h as Hospital & { doctors?: Doctor[]; departments?: Department[] };
+        const depts = Array.isArray(hp.departments) ? hp.departments : [];
+        const doctorList = Array.isArray(hp.doctors) ? hp.doctors : [];
         setDepartments(depts);
-        const doctorList = (h as { doctors?: Doctor[] }).doctors ?? docs;
-        setDoctors(Array.isArray(doctorList) ? doctorList : []);
+        setDoctors(doctorList);
         const staffArr = Array.isArray(staffRes) ? staffRes : (staffRes as { staff?: Staff[] })?.staff ?? [];
         setStaffList(staffArr);
         setHospital(h as Hospital);
-        const hp = h as Hospital;
         const deptNames = depts.map((d) => d.name).join('\n');
-        const docIds = (Array.isArray(doctorList) ? doctorList : []).map((d) => d.id);
+        const docIds = doctorList.map((d) => d.id);
         setForm({
           name: hp.name ?? '',
           address: hp.address ?? '',
@@ -109,7 +105,7 @@ export default function HospitalDetail() {
         setAcceptingPatients(hp.isActive !== false);
       })
       .catch(() => { if (!signal.aborted) setHospital(null); })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!signal.aborted) setLoading(false); });
     return () => ctrl.abort();
   }, [id, hospitalId]);
 
@@ -123,12 +119,12 @@ export default function HospitalDetail() {
         const data = r.data?.logs ?? r.data?.data ?? r.data;
         setActivityLogs(Array.isArray(data) ? data : []);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => ctrl.abort();
   }, [hospitalId]);
 
   useEffect(() => {
-    if (!editModal) return;
+    if (!editModal && !addDeptModal) return;
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     Promise.all([
@@ -136,11 +132,83 @@ export default function HospitalDetail() {
       doctorsApi.getAll({ limit: 200 }, { signal }).then((r) => (r.data?.doctors ?? r.data?.data ?? []) as Doctor[]),
     ]).then(([userList, docList]) => {
       if (signal.aborted) return;
-      setUsersForHead(Array.isArray(userList) ? userList : []);
+      const list = Array.isArray(userList) ? userList : [];
+      const getRoleName = (u: User) => {
+        const r = (u as User & { role?: string | { name?: string } }).role;
+        return (typeof r === 'string' ? r : (r as { name?: string })?.name ?? '').toLowerCase();
+      };
+      const adminAndSuperadmin = list.filter((u) => {
+        const role = getRoleName(u);
+        return role === 'admin' || role === 'superadmin';
+      });
+      setUsersForHead(adminAndSuperadmin);
       setAllDoctorsForSelect(Array.isArray(docList) ? docList : []);
-    }).catch(() => {});
+    }).catch(() => { });
     return () => ctrl.abort();
-  }, [editModal]);
+  }, [editModal, addDeptModal]);
+
+  useEffect(() => {
+    if (editModal && form.departmentNames !== undefined) {
+      setEditDepartmentChips(form.departmentNames.trim() ? form.departmentNames.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean) : []);
+    }
+  }, [editModal, form.departmentNames]);
+
+  useEffect(() => {
+    if (!doctorSelectOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (doctorSelectRef.current && !doctorSelectRef.current.contains(e.target as Node)) setDoctorSelectOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [doctorSelectOpen]);
+
+  useEffect(() => {
+    if (!departmentSelectOpen) return;
+    const onDept = (e: MouseEvent) => {
+      if (departmentSelectRef.current && !departmentSelectRef.current.contains(e.target as Node)) setDepartmentSelectOpen(false);
+    };
+    document.addEventListener('mousedown', onDept);
+    return () => document.removeEventListener('mousedown', onDept);
+  }, [departmentSelectOpen]);
+
+  useEffect(() => {
+    if (activeTab !== 'people' || (peopleRoleFilter !== 'customer' && peopleRoleFilter !== 'all')) return;
+    const ctrl = new AbortController();
+    setCustomersLoading(true);
+    adminApi.getUsers({ page: 1, limit: 200 }, { signal: ctrl.signal })
+      .then(({ data }) => {
+        const payload = data?.data ?? data;
+        const list = (payload?.users ?? payload?.data ?? payload) as User[] | undefined;
+        const arr = Array.isArray(list) ? list : [];
+        const getRoleName = (u: User) => (typeof (u as User & { role?: { name?: string } }).role === 'object' ? (u as User & { role?: { name?: string } }).role?.name : '') ?? '';
+        setCustomersList(arr.filter((u) => getRoleName(u).toLowerCase() === 'customer'));
+      })
+      .catch(() => setCustomersList([]))
+      .finally(() => setCustomersLoading(false));
+    return () => ctrl.abort();
+  }, [activeTab, peopleRoleFilter]);
+
+  const addDepartmentChip = (name: string) => {
+    const n = name.trim();
+    if (n && !editDepartmentChips.includes(n)) setEditDepartmentChips((prev) => [...prev, n]);
+    setNewDeptName('');
+  };
+  const removeDepartmentChip = (name: string) => {
+    setEditDepartmentChips((prev) => prev.filter((c) => c !== name));
+  };
+
+  const handleHospitalFileUpload = async (field: 'recordsUrl' | 'contractUrl' | 'backgroundImageUrl', file: File) => {
+    setUploadingFile(field === 'recordsUrl' ? 'records' : field === 'contractUrl' ? 'contract' : 'background');
+    try {
+      const { data } = await adminApi.uploadStaffFile(file);
+      const url = typeof data === 'object' && data?.url ? data.url : (data as string);
+      setForm((f) => ({ ...f, [field]: url }));
+    } catch (err) {
+      console.error('Upload failed', err);
+    } finally {
+      setUploadingFile(null);
+    }
+  };
 
   const toggleDoctorId = (doctorId: number) => {
     setForm((prev) =>
@@ -163,19 +231,37 @@ export default function HospitalDetail() {
       operatingDate: form.operatingDate.trim() || undefined,
       operatingHours: form.operatingHours.trim() || undefined,
       headId: form.headId ? Number(form.headId) : undefined,
-      departmentNames: form.departmentNames.trim() ? form.departmentNames.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean) : undefined,
+      departmentNames: editDepartmentChips.length ? editDepartmentChips : undefined,
       doctorIds: form.doctorIds.length ? form.doctorIds : undefined,
       recordsUrl: form.recordsUrl.trim() || undefined,
       contractUrl: form.contractUrl.trim() || undefined,
       backgroundImageUrl: form.backgroundImageUrl.trim() || undefined,
       website: form.website?.trim() || undefined,
     };
+    setSaveError('');
     try {
       await adminApi.updateHospital(hospital.id, payload);
       const { data } = await adminApi.getHospital(hospital.id);
       const updated = data?.data ?? data;
-      if (updated && typeof updated === 'object') setHospital(updated as Hospital);
+      if (updated && typeof updated === 'object') {
+        const u = updated as Hospital & { doctors?: Doctor[]; departments?: Department[] };
+        setHospital(updated as Hospital);
+        if (Array.isArray(u.doctors)) setDoctors(u.doctors);
+        if (Array.isArray(u.departments)) setDepartments(u.departments);
+        const docIds = (u.doctors ?? []).map((d) => d.id);
+        const deptNames = (u.departments ?? []).map((d) => d.name);
+        setForm((f) => ({
+          ...f,
+          departmentNames: deptNames.join('\n'),
+          doctorIds: docIds,
+        }));
+        setEditDepartmentChips(deptNames);
+      }
       setEditModal(false);
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { message?: string | string[] } } };
+      const msg = ax.response?.data?.message;
+      setSaveError(Array.isArray(msg) ? msg.join('. ') : (typeof msg === 'string' ? msg : 'Failed to save hospital'));
     } finally {
       setSaving(false);
     }
@@ -186,14 +272,38 @@ export default function HospitalDetail() {
     if (!hospitalId || !deptForm.name.trim()) return;
     setSaving(true);
     try {
-      const { data } = await adminApi.createDepartment({ name: deptForm.name.trim(), hospitalId, description: deptForm.description.trim() || undefined });
+      const headId = deptForm.headId ? parseInt(deptForm.headId, 10) : undefined;
+      const { data } = await adminApi.createDepartment({
+        name: deptForm.name.trim(),
+        hospitalId,
+        description: deptForm.description.trim() || undefined,
+        headId,
+      });
       const created = data?.data ?? data;
       if (created && typeof created === 'object' && 'id' in created) setDepartments((prev) => [...prev, created as Department]);
-      setDeptForm({ name: '', description: '' });
+      setDeptForm({ name: '', description: '', headId: '' });
       setAddDeptModal(false);
     } finally {
       setSaving(false);
     }
+  };
+
+  const refetchHospitalData = async () => {
+    const { data } = await adminApi.getHospital(hospitalId);
+    const updated = data?.data ?? data;
+    if (updated && typeof updated === 'object') {
+      const u = updated as Hospital & { doctors?: Doctor[]; departments?: Department[] };
+      setHospital(updated as Hospital);
+      setAcceptingPatients((u as Hospital).isActive !== false);
+      if (Array.isArray(u.doctors)) setDoctors(u.doctors);
+      if (Array.isArray(u.departments)) setDepartments(u.departments);
+    }
+  };
+  const refetchStaff = async () => {
+    const { data } = await adminApi.getStaff({ hospitalId, limit: 100 });
+    const staffRes = data?.staff ?? data?.data ?? data;
+    const staffArr = Array.isArray(staffRes) ? staffRes : (staffRes as { staff?: Staff[] })?.staff ?? [];
+    setStaffList(staffArr);
   };
 
   if (loading) {
@@ -213,13 +323,28 @@ export default function HospitalDetail() {
     );
   }
 
-  const handleDelete = getHospitalDeleteHandler(hospital.id, t, confirm, navigate);
+  const openDeleteModal = () => {
+    setShowDeleteModal(true);
+    setDeleteReason('');
+  };
+
+  const confirmDeleteHospital = async () => {
+    if (!deleteReason.trim()) return;
+    setDeleting(true);
+    try {
+      await adminApi.deleteHospital(hospital.id, { reason: deleteReason.trim() });
+      navigate('/admin/hospitals');
+    } catch (err) {
+      console.error('Failed to delete hospital', err);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'overview', label: t('hospitalDetail.overview') },
-    { id: 'doctors', label: t('hospitalDetail.doctors') },
+    { id: 'people', label: t('hospitalDetail.people') || 'People' },
     { id: 'departments', label: t('hospitalDetail.departments') },
-    { id: 'staff', label: t('hospitalDetail.staff') },
   ];
 
   function getDoctorName(d: Doctor): string {
@@ -231,8 +356,7 @@ export default function HospitalDetail() {
     if (!hospital) return;
     try {
       await adminApi.updateHospital(hospital.id, { isActive: !acceptingPatients });
-      setAcceptingPatients(!acceptingPatients);
-      setHospital((prev) => prev ? { ...prev, isActive: !acceptingPatients } : null);
+      await refetchHospitalData();
     } catch (e) {
       console.error(e);
     }
@@ -248,12 +372,6 @@ export default function HospitalDetail() {
             <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </button>
           <h1 className="text-lg font-bold text-gray-900 truncate flex-1">Facility Administration</h1>
-          <button type="button" onClick={() => setEditModal(true)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-700" aria-label={t('common.edit')}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-          </button>
-          <button type="button" onClick={handleDelete} className="p-2 rounded-lg hover:bg-red-50 text-red-600" aria-label={t('common.delete')}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-          </button>
         </div>
 
         <nav className="max-w-lg mx-auto px-4 flex gap-1 overflow-x-auto border-t border-gray-100" aria-label="Tabs">
@@ -292,11 +410,13 @@ export default function HospitalDetail() {
                   </div>
                 </div>
                 <div className="flex gap-2 mt-3">
-                  <button type="button" onClick={() => setEditModal(true)} className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-medium flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    {t('hospitalDetail.editDetails')}
-                  </button>
-                  <Link to="/admin/employees" className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium flex items-center gap-2">
+                  {canEditHospital && (
+                    <button type="button" onClick={() => setEditModal(true)} className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-medium flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      {t('hospitalDetail.editDetails')}
+                    </button>
+                  )}
+                  <Link to="/admin/users?roleTab=staff" className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium flex items-center gap-2">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     Staffing
                   </Link>
@@ -313,7 +433,14 @@ export default function HospitalDetail() {
                     {acceptingPatients ? 'ACTIVE' : 'INACTIVE'}
                   </span>
                 </h3>
-                <button type="button" role="switch" aria-checked={acceptingPatients} onClick={toggleAccepting} className={`relative w-11 h-6 rounded-full transition ${acceptingPatients ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={acceptingPatients}
+                  disabled={!canEditHospital}
+                  onClick={canEditHospital ? toggleAccepting : undefined}
+                  className={`relative w-11 h-6 rounded-full transition ${acceptingPatients ? 'bg-blue-600' : 'bg-gray-300'} ${!canEditHospital ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
                   <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition left-1 ${acceptingPatients ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
               </div>
@@ -352,7 +479,7 @@ export default function HospitalDetail() {
                   <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                   Assigned Doctors
                 </h3>
-                <button type="button" onClick={() => setActiveTab('doctors')} className="text-sm font-medium text-blue-600 hover:underline">View All</button>
+                <button type="button" onClick={() => setActiveTab('people')} className="text-sm font-medium text-blue-600 hover:underline">View All</button>
               </div>
               <ul className="space-y-3">
                 {doctors.slice(0, 4).map((d) => (
@@ -432,37 +559,104 @@ export default function HospitalDetail() {
           </section>
         )}
 
-        {activeTab === 'doctors' && (
+        {activeTab === 'people' && (
           <section className="space-y-4">
-            <p className="text-sm text-gray-500">{t('hospitalDetail.doctorsDescription')}</p>
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">{t('hospitalDetail.viewDoctors')}</h2>
-              <Link to={`/admin/users?role=doctor&hospitalId=${hospital.id}`} className="text-sm font-medium text-blue-600 hover:underline">
-                + {t('hospitalDetail.addDoctor')}
-              </Link>
-            </div>
-            {doctors.length === 0 ? (
-              <div className="rounded-xl bg-white border border-gray-200 p-6 text-center text-gray-500 text-sm">
-                {t('hospitalDetail.noDoctors')}
-              </div>
-            ) : (
-              <ul className="space-y-3">
-                {doctors.map((d) => (
-                  <li key={d.id} className="rounded-xl bg-white border border-gray-200 p-4 flex items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-sm font-medium">
-                      {getDoctorName(d).slice(0, 2).toUpperCase()}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-gray-900 truncate">{getDoctorName(d)}</p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {(d.specializations ?? []).map((s) => s.name).join(', ') || '—'}
-                      </p>
-                    </div>
-                    <Link to={`/doctors/${d.id}`} className="text-sm text-blue-600 font-medium shrink-0">{t('hospitalDetail.viewProfile')}</Link>
-                  </li>
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={peopleRoleFilter} onChange={(e) => setPeopleRoleFilter(e.target.value as PeopleRoleFilter)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-white">
+                <option value="all">{t('admin.allFilter')}</option>
+                <option value="doctor">{t('auth.doctor')}</option>
+                <option value="staff">{(t('employeeDirectory.employees') || 'Staff')}</option>
+                <option value="customer">{t('auth.patient')}</option>
+              </select>
+              <select value={peopleDepartmentId} onChange={(e) => setPeopleDepartmentId(e.target.value === '' ? '' : Number(e.target.value))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-white">
+                <option value="">{t('adminUsers.department')} — {t('admin.allFilter')}</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
-              </ul>
-            )}
+              </select>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-semibold text-gray-900">{t('hospitalDetail.people') || 'People'}</h2>
+              <button type="button" onClick={() => setAddUserModal(true)} className="text-sm font-medium text-blue-600 hover:underline">+ {t('hospitalDetail.addUsers')}</button>
+            </div>
+
+            {(() => {
+              const getDoctorDepartmentIds = (d: Doctor) => (d as Doctor & { doctorDepartments?: { departmentId: number }[] }).doctorDepartments?.map((dd) => dd.departmentId) ?? [];
+              const filteredDoctors = (peopleRoleFilter === 'all' || peopleRoleFilter === 'doctor')
+                ? doctors.filter((d) => !peopleDepartmentId || getDoctorDepartmentIds(d).includes(peopleDepartmentId))
+                : [];
+              const filteredStaff = (peopleRoleFilter === 'all' || peopleRoleFilter === 'staff')
+                ? staffList.filter((s) => !peopleDepartmentId || (s as Staff & { departmentId?: number }).departmentId === peopleDepartmentId || (s.department?.id) === peopleDepartmentId)
+                : [];
+              const filteredCustomers = (peopleRoleFilter === 'all' || peopleRoleFilter === 'customer') ? customersList : [];
+              const hasDoctor = filteredDoctors.length > 0;
+              const hasStaff = filteredStaff.length > 0;
+              const hasCustomer = filteredCustomers.length > 0;
+              const isEmpty = !hasDoctor && !hasStaff && !hasCustomer && !customersLoading;
+
+              return (
+                <>
+                  {customersLoading && peopleRoleFilter !== 'doctor' && peopleRoleFilter !== 'staff' && <p className="text-sm text-gray-500">{t('common.loading')}</p>}
+                  {isEmpty && !customersLoading && (
+                    <div className="rounded-xl bg-white border border-gray-200 p-6 text-center text-gray-500 text-sm">
+                      {peopleRoleFilter === 'customer' ? (t('adminUsers.noUsersYet') || 'No customers.') : peopleRoleFilter === 'staff' ? t('hospitalDetail.noStaff') : peopleRoleFilter === 'doctor' ? t('hospitalDetail.noDoctors') : t('hospitalDetail.noDoctors')}
+                    </div>
+                  )}
+                  {hasDoctor && (
+                    <ul className="space-y-3">
+                      {filteredDoctors.map((d) => (
+                        <li key={`d-${d.id}`} className="rounded-xl bg-white border border-gray-200 p-4 flex items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-sm font-medium">
+                            {getDoctorName(d).slice(0, 2).toUpperCase()}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-gray-900 truncate">{getDoctorName(d)}</p>
+                            <p className="text-xs text-gray-500 truncate">{(d.specializations ?? []).map((s) => s.name).join(', ') || '—'}</p>
+                          </div>
+                          <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">{t('auth.doctor')}</span>
+                          <Link to={`/doctors/${d.id}`} className="text-sm text-blue-600 font-medium shrink-0">{t('hospitalDetail.viewProfile')}</Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {hasStaff && (
+                    <ul className="space-y-3">
+                      {filteredStaff.map((s) => (
+                        <li key={`s-${s.id}`} className="rounded-xl bg-white border border-gray-200 p-4 flex items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600 text-sm font-medium">
+                            {s.user?.firstName?.slice(0, 1)}{s.user?.lastName?.slice(0, 1) || '?'}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-gray-900 truncate">{s.user?.firstName} {s.user?.lastName}</p>
+                            <p className="text-xs text-gray-500 truncate">{s.jobTitle ?? (s as Staff & { position?: string }).position ?? '—'}</p>
+                            {s.department && <p className="text-xs text-gray-400">{s.department.name}</p>}
+                          </div>
+                          <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">Staff</span>
+                          <Link to={`/admin/employees/${s.id}`} className="text-sm text-blue-600 font-medium shrink-0">{t('hospitalDetail.viewProfile')}</Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {hasCustomer && (
+                    <ul className="space-y-3">
+                      {filteredCustomers.map((u) => (
+                        <li key={`c-${u.id}`} className="rounded-xl bg-white border border-gray-200 p-4 flex items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 text-sm font-medium">
+                            {(u.firstName?.[0] ?? '') + (u.lastName?.[0] ?? '') || '?'}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-gray-900 truncate">{[u.firstName, u.lastName].filter(Boolean).join(' ') || '—'}</p>
+                            <p className="text-xs text-gray-500 truncate">{u.email ?? '—'}</p>
+                          </div>
+                          <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">{t('auth.patient')}</span>
+                          <Link to={`/admin/users/${u.id}`} className="text-sm text-blue-600 font-medium shrink-0">{t('hospitalDetail.viewProfile')}</Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              );
+            })()}
           </section>
         )}
 
@@ -499,14 +693,13 @@ export default function HospitalDetail() {
             <p className="text-sm text-gray-500">{t('hospitalDetail.staffDescription')}</p>
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-gray-900">{t('hospitalDetail.viewStaff')}</h2>
-              <Link to="/admin/employees" className="text-sm font-medium text-blue-600 hover:underline">
-                + {t('hospitalDetail.addStaff')}
-              </Link>
+              <button type="button" onClick={() => setAddUserModal(true)} className="text-sm font-medium text-blue-600 hover:underline">
+                + {t('hospitalDetail.addUsers')}
+              </button>
             </div>
             {staffList.length === 0 ? (
               <div className="rounded-xl bg-white border border-gray-200 p-6 text-center text-gray-500 text-sm">
                 {t('hospitalDetail.noStaff')}
-                <p className="mt-2 text-xs">Add staff via Employees.</p>
               </div>
             ) : (
               <ul className="space-y-3">
@@ -529,11 +722,12 @@ export default function HospitalDetail() {
         )}
       </main>
 
-      {editModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => setEditModal(false)}>
+      {editModal && canEditHospital && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => { setEditModal(false); setSaveError(''); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('admin.editHospital')}</h3>
             <form onSubmit={saveHospital} className="space-y-4">
+              {saveError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{saveError}</p>}
               {(['name', 'address', 'phone', 'email', 'description'] as const).map((field) => (
                 <div key={field}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{t(`admin.${field}` as 'admin.name')}</label>
@@ -561,39 +755,135 @@ export default function HospitalDetail() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Departments (one per line or comma-separated)</label>
-                <textarea rows={2} value={form.departmentNames} onChange={(e) => setForm((f) => ({ ...f, departmentNames: e.target.value }))} placeholder="Cardiology, Pediatrics" className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Doctors (select to assign)</label>
-                <div className="max-h-32 overflow-y-auto rounded-lg border border-gray-300 p-2 space-y-1">
-                  {allDoctorsForSelect.slice(0, 80).map((d) => (
-                    <label key={d.id} className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.doctorIds.includes(d.id)} onChange={() => toggleDoctorId(d.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                      <span className="text-sm">Dr. {d.user?.firstName} {d.user?.lastName}</span>
-                    </label>
-                  ))}
+              <div ref={departmentSelectRef} className="relative">
+                <label className="block text-sm font-medium text-gray-500 mb-1">{t('adminUsers.department')} (multiple)</label>
+                <div
+                  role="combobox"
+                  aria-expanded={departmentSelectOpen}
+                  onClick={() => setDepartmentSelectOpen((o) => !o)}
+                  className="min-h-[42px] rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 flex flex-wrap items-center gap-2 cursor-pointer focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {editDepartmentChips.length > 0 ? (
+                    editDepartmentChips.map((name) => (
+                      <span
+                        key={name}
+                        className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-gray-700 text-white text-sm"
+                      >
+                        {name}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); removeDepartmentChip(name); }}
+                          className="p-0.5 rounded-full hover:bg-gray-600 text-gray-200 hover:text-white"
+                          aria-label={t('common.delete')}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-gray-400 text-sm">— {t('adminUsers.selectDepartment')} —</span>
+                  )}
+                  <span className="ml-auto shrink-0 text-gray-400 pointer-events-none">
+                    <svg className={`w-5 h-5 transition-transform ${departmentSelectOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </span>
                 </div>
+                {departmentSelectOpen && (
+                  <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg max-h-48 overflow-y-auto py-1">
+                    {departments.filter((d) => !editDepartmentChips.includes(d.name)).map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); addDepartmentChip(d.name); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-100"
+                      >
+                        {d.name}
+                      </button>
+                    ))}
+                    {departments.filter((d) => !editDepartmentChips.includes(d.name)).length === 0 && (
+                      <p className="px-3 py-2 text-sm text-gray-500">No more departments to add</p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div ref={doctorSelectRef} className="relative">
+                <label className="block text-sm font-medium text-gray-500 mb-1">Doctors (select to assign)</label>
+                <div
+                  role="combobox"
+                  aria-expanded={doctorSelectOpen}
+                  onClick={() => setDoctorSelectOpen((o) => !o)}
+                  className="min-h-[42px] rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 flex flex-wrap items-center gap-2 cursor-pointer focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {form.doctorIds.length > 0 ? (
+                    form.doctorIds.map((id) => {
+                      const d = allDoctorsForSelect.find((doc) => doc.id === id);
+                      const label = d ? `Dr. ${d.user?.firstName ?? ''} ${d.user?.lastName ?? ''}`.trim() || `ID ${id}` : `ID ${id}`;
+                      return (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-gray-700 text-white text-sm"
+                        >
+                          {label}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); toggleDoctorId(id); }}
+                            className="p-0.5 rounded-full hover:bg-gray-600 text-gray-200 hover:text-white"
+                            aria-label={t('common.delete')}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="text-gray-400 text-sm">— Select doctors —</span>
+                  )}
+                  <span className="ml-auto shrink-0 text-gray-400 pointer-events-none">
+                    <svg className={`w-5 h-5 transition-transform ${doctorSelectOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </span>
+                </div>
+                {doctorSelectOpen && (
+                  <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg max-h-48 overflow-y-auto py-1">
+                    {allDoctorsForSelect.slice(0, 80).map((d) => {
+                      const selected = form.doctorIds.includes(d.id);
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); toggleDoctorId(d.id); }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${selected ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'}`}
+                        >
+                          Dr. {d.user?.firstName} {d.user?.lastName}
+                        </button>
+                      );
+                    })}
+                    {allDoctorsForSelect.length === 0 && <p className="px-3 py-2 text-sm text-gray-500">No doctors available</p>}
+                  </div>
+                )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Records URL</label>
-                <input type="url" value={form.recordsUrl} onChange={(e) => setForm((f) => ({ ...f, recordsUrl: e.target.value }))} placeholder="https://..." className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Records (file)</label>
+                {form.recordsUrl && <p className="text-xs text-gray-500 mb-1 truncate">{form.recordsUrl}</p>}
+                <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleHospitalFileUpload('recordsUrl', f); e.target.value = ''; }} disabled={!!uploadingFile} className="w-full text-sm text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700" />
+                {uploadingFile === 'records' && <span className="text-xs text-gray-500">{t('common.loading')}</span>}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Contract URL</label>
-                <input type="url" value={form.contractUrl} onChange={(e) => setForm((f) => ({ ...f, contractUrl: e.target.value }))} placeholder="https://..." className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contract (file)</label>
+                {form.contractUrl && <p className="text-xs text-gray-500 mb-1 truncate">{form.contractUrl}</p>}
+                <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleHospitalFileUpload('contractUrl', f); e.target.value = ''; }} disabled={!!uploadingFile} className="w-full text-sm text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700" />
+                {uploadingFile === 'contract' && <span className="text-xs text-gray-500">{t('common.loading')}</span>}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Background image URL</label>
-                <input type="url" value={form.backgroundImageUrl} onChange={(e) => setForm((f) => ({ ...f, backgroundImageUrl: e.target.value }))} placeholder="https://..." className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Background image (file)</label>
+                {form.backgroundImageUrl && <p className="text-xs text-gray-500 mb-1 truncate">{form.backgroundImageUrl}</p>}
+                <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleHospitalFileUpload('backgroundImageUrl', f); e.target.value = ''; }} disabled={!!uploadingFile} className="w-full text-sm text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700" />
+                {uploadingFile === 'background' && <span className="text-xs text-gray-500">{t('common.loading')}</span>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
                 <input type="url" value={form.website} onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} placeholder="https://..." className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setEditModal(false)} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">{t('common.cancel')}</button>
+                <button type="button" onClick={() => { setEditModal(false); setSaveError(''); }} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">{t('common.cancel')}</button>
                 <button type="submit" disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving ? t('admin.saving') : t('common.save')}</button>
               </div>
             </form>
@@ -614,11 +904,56 @@ export default function HospitalDetail() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('admin.description')}</label>
                 <textarea rows={2} value={deptForm.description} onChange={(e) => setDeptForm((f) => ({ ...f, description: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('admin.responsibleAdmin')}</label>
+                <select value={deptForm.headId} onChange={(e) => setDeptForm((f) => ({ ...f, headId: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm">
+                  <option value="">— {t('admin.selectManager')} —</option>
+                  {usersForHead.map((u) => (
+                    <option key={u.id} value={u.id}>{[u.firstName, u.lastName].filter(Boolean).join(' ')} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setAddDeptModal(false)} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">{t('common.cancel')}</button>
                 <button type="submit" disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving ? t('admin.saving') : t('common.save')}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {addUserModal && hospital && (
+        <AddUserModal
+          open={addUserModal}
+          onClose={() => setAddUserModal(false)}
+          title={t('hospitalDetail.addUsers')}
+          fixedHospitalId={hospital.id}
+          fixedDepartments={departments}
+          onSuccess={() => { refetchHospitalData(); refetchStaff(); }}
+        />
+      )}
+
+      {showDeleteModal && canEditHospital && hospital && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" onClick={() => !deleting && setShowDeleteModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900">{t('admin.deleteHospital')}</h3>
+            <p className="text-sm text-gray-600">{t('admin.deleteHospitalConfirm')} — {hospital.name}</p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('adminUsers.deactivateReasonLabel')} *</label>
+              <textarea
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder={t('adminUsers.deactivateReasonPlaceholder')}
+                rows={3}
+                className="w-full rounded-xl border border-gray-300 px-4 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setShowDeleteModal(false)} disabled={deleting} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{t('common.cancel')}</button>
+              <button type="button" onClick={confirmDeleteHospital} disabled={deleting || !deleteReason.trim()} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                {deleting ? t('common.loading') : t('common.delete')}
+              </button>
+            </div>
           </div>
         </div>
       )}

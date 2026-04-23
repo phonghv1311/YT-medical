@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
@@ -68,20 +68,32 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.userModel.findOne({
-      where: { email: dto.email },
-      include: [{ model: Role }],
-    });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    try {
+      const user = await this.userModel.findOne({
+        where: { email: dto.email },
+        include: [{ model: Role }],
+      });
+      if (!user) throw new UnauthorizedException('Invalid credentials');
 
-    const valid = await bcrypt.compare(dto.password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
-    if (!user.isActive) throw new UnauthorizedException('Account is deactivated');
+      if (!user.password) {
+        console.error('[AuthService.login] User has no password set:', user.email);
+        throw new UnauthorizedException('Invalid credentials');
+      }
+      const valid = await bcrypt.compare(dto.password, user.password);
+      if (!valid) throw new UnauthorizedException('Invalid credentials');
+      if (!user.isActive) throw new UnauthorizedException('Account is deactivated');
 
-    const roleName = user.role?.name || 'customer';
-    const tokens = await this.generateTokens(user.id, user.email, roleName);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
-    return { user: this.sanitizeUser(user, roleName), ...tokens };
+      const roleName = (user as any).role?.name ?? (user as any).Role?.name ?? 'customer';
+      const tokens = await this.generateTokens(user.id, user.email, roleName);
+      await this.updateRefreshToken(user.id, tokens.refreshToken);
+      return { user: this.sanitizeUser(user, roleName), ...tokens };
+    } catch (err: any) {
+      if (err instanceof UnauthorizedException) throw err;
+      console.error('[AuthService.login]', err?.message ?? err);
+      throw new InternalServerErrorException(
+        process.env.NODE_ENV === 'production' ? 'Login failed' : err?.message ?? 'Login failed',
+      );
+    }
   }
 
   async refreshTokens(refreshToken: string) {
@@ -109,31 +121,34 @@ export class AuthService {
   }
 
   private async generateTokens(userId: number, email: string, role: string) {
-    const accessExpiresIn = this.configService.get<string>('jwt.accessExpiresIn', '15m');
-    const refreshExpiresIn = this.configService.get<string>('jwt.refreshExpiresIn', '7d');
+    const accessSecret = this.configService.get<string>('jwt.accessSecret') || 'access-secret';
+    const refreshSecret = this.configService.get<string>('jwt.refreshSecret') || 'refresh-secret';
+    const accessExpiresIn = this.configService.get<string>('jwt.accessExpiresIn', '2h');
+    const refreshExpiresIn = this.configService.get<string>('jwt.refreshExpiresIn', '2h');
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
         { sub: userId, email, role },
-        {
-          secret: this.configService.get<string>('jwt.accessSecret'),
-          expiresIn: accessExpiresIn as unknown as number,
-        },
+        { secret: accessSecret, expiresIn: accessExpiresIn as unknown as number },
       ),
       this.jwtService.signAsync(
         { sub: userId, email, role },
-        {
-          secret: this.configService.get<string>('jwt.refreshSecret'),
-          expiresIn: refreshExpiresIn as unknown as number,
-        },
+        { secret: refreshSecret, expiresIn: refreshExpiresIn as unknown as number },
       ),
     ]);
     return { accessToken, refreshToken };
   }
 
   private async updateRefreshToken(userId: number, refreshToken: string) {
-    const hashed = await bcrypt.hash(refreshToken, 10);
-    await this.userModel.update({ refreshToken: hashed }, { where: { id: userId } });
+    try {
+      const hashed = await bcrypt.hash(refreshToken, 10);
+      await this.userModel.update({ refreshToken: hashed }, { where: { id: userId } });
+    } catch (err: any) {
+      console.error('[AuthService.updateRefreshToken]', err?.message ?? err);
+      throw new InternalServerErrorException(
+        process.env.NODE_ENV === 'production' ? 'Login failed' : err?.message ?? 'Failed to save session',
+      );
+    }
   }
 
   private sanitizeUser(user: User, role: string) {

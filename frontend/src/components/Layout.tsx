@@ -65,7 +65,7 @@ export default function Layout() {
             onLogout={handleLogout}
             onCloseMenu={() => setCustomerMenuOpen(false)}
           />
-          <main className="flex-1 min-h-0 max-w-lg mx-auto w-full px-4 pb-20">
+          <main className="flex-1 min-h-0 max-w-lg mx-auto w-full px-3 pb-20">
             <Outlet />
           </main>
           <BottomNav />
@@ -118,7 +118,7 @@ export default function Layout() {
           onLogout={handleLogout}
           onCloseMenu={() => setDoctorMenuOpen(false)}
         />
-        <main className="flex-1 min-h-0 max-w-lg mx-auto w-full px-4 pb-20">
+        <main className="flex-1 min-h-0 max-w-lg mx-auto w-full px-3 pb-20">
           <Outlet />
         </main>
         <BottomNav />
@@ -140,7 +140,7 @@ export default function Layout() {
           onLogout={handleLogout}
           onCloseMenu={() => setAdminMenuOpen(false)}
         />
-        <main className="flex-1 min-h-0 max-w-lg mx-auto w-full px-4 pb-20">
+        <main className="flex-1 min-h-0 max-w-lg mx-auto w-full px-3 pb-20">
           <Outlet />
         </main>
         <BottomNav />

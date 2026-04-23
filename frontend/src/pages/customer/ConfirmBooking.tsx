@@ -65,34 +65,39 @@ export default function ConfirmBooking() {
       setLoading(false);
       return;
     }
-    getDoctorOnce(id)
+    const ctrl = new AbortController();
+    getDoctorOnce(id, { signal: ctrl.signal })
       .then(({ data }) => setDoctor(data?.data ?? data ?? null))
-      .catch(() => setDoctor(null))
+      .catch((err) => { if (err?.code !== 'ERR_CANCELED') setDoctor(null); })
       .finally(() => setLoading(false));
+    return () => ctrl.abort();
   }, [id]);
 
-  const fetchSlots = useCallback((d: string) => {
+  const fetchSlots = useCallback((d: string, signal?: AbortSignal) => {
     if (!id || !d) {
       setSlots([]);
       return;
     }
     setSlotsLoading(true);
-    doctorsApi.getAvailability(id, d)
+    doctorsApi.getAvailability(id, d, { signal })
       .then(({ data }) => {
         const raw = data?.data ?? data;
         setSlots(Array.isArray(raw) ? raw : []);
       })
-      .catch(() => setSlots([]))
+      .catch((err) => { if (err?.code !== 'ERR_CANCELED') setSlots([]); })
       .finally(() => setSlotsLoading(false));
   }, [id]);
 
   useEffect(() => {
-    if (date) fetchSlots(date);
+    const ctrl = new AbortController();
+    if (date) fetchSlots(date, ctrl.signal);
     else setSlots([]);
+    return () => ctrl.abort();
   }, [date, fetchSlots]);
 
   useEffect(() => {
-    getPaymentMethodsOnce()
+    const ctrl = new AbortController();
+    getPaymentMethodsOnce({ signal: ctrl.signal })
       .then((res) => {
         const raw = res.data?.data ?? res.data;
         const list = Array.isArray(raw) ? raw : [];
@@ -100,8 +105,9 @@ export default function ConfirmBooking() {
         const defaultMethod = list.find((m: PaymentMethod) => m.isDefault) ?? list[0];
         if (defaultMethod) setSelectedPaymentMethodId(defaultMethod.id);
       })
-      .catch(() => setPaymentMethods([]))
+      .catch((err) => { if (err?.code !== 'ERR_CANCELED') setPaymentMethods([]); })
       .finally(() => setPaymentMethodsLoading(false));
+    return () => ctrl.abort();
   }, []);
 
   const handleConfirm = async () => {

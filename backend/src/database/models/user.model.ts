@@ -58,6 +58,12 @@ export class User extends Model {
   })
   declare avatar: string | null;
 
+  @Column({
+    type: DataType.STRING(1000),
+    allowNull: true,
+  })
+  declare address: string | null;
+
   @ForeignKey(() => Role)
   @Column({
     type: DataType.INTEGER,
@@ -71,6 +77,18 @@ export class User extends Model {
     allowNull: false,
   })
   declare isActive: boolean;
+
+  @Column({
+    type: DataType.STRING(1000),
+    allowNull: true,
+  })
+  declare deactivatedReason: string | null;
+
+  @Column({
+    type: DataType.DATE,
+    allowNull: true,
+  })
+  declare deactivatedAt: Date | null;
 
   @Column({
     type: DataType.STRING,

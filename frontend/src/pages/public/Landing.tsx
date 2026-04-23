@@ -1,11 +1,17 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, Navigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import LanguageSwitcher from '../../components/LanguageSwitcher';
+import { useAppSelector } from '../../hooks/useAppDispatch';
 
 export default function Landing() {
   const { t } = useLanguage();
   const location = useLocation();
   const message = (location.state as { message?: string } | null)?.message;
+  const { user, accessToken } = useAppSelector((s) => s.auth);
+
+  if (accessToken && user) {
+    return <Navigate to="/home" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-white flex flex-col">

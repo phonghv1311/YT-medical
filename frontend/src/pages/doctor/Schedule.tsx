@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { doctorsApi } from '../../api/doctors';
 import type { AvailabilitySlot, Appointment } from '../../types';
@@ -73,33 +73,33 @@ export default function DoctorSchedule() {
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
   const selectedDateStr = selectedDate.toISOString().split('T')[0];
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const cancelled = { current: false };
+  const fetchScheduleData = useCallback((signal?: AbortSignal) => {
+    setLoading(true);
     Promise.all([
-      doctorsApi.me.getAvailability(undefined, { signal: ctrl.signal }),
-      doctorsApi.me.getAppointments({ signal: ctrl.signal }),
+      doctorsApi.me.getAvailability(undefined, { signal }),
+      doctorsApi.me.getAppointments({ signal }),
     ])
       .then(([slotRes, apptRes]) => {
-        if (cancelled.current) return;
         setSlots((slotRes.data?.data ?? slotRes.data) ?? []);
         const apptData = apptRes.data?.data ?? apptRes.data;
         setAppointments(Array.isArray(apptData) ? apptData : []);
       })
       .catch(() => {
-        if (!cancelled.current) {
-          setSlots([]);
-          setAppointments([]);
-        }
+        setSlots([]);
+        setAppointments([]);
       })
       .finally(() => {
-        if (!cancelled.current) setLoading(false);
+        setLoading(false);
       });
+  }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchScheduleData(ctrl.signal);
     return () => {
-      cancelled.current = true;
       ctrl.abort();
     };
-  }, []);
+  }, [fetchScheduleData]);
 
   const daySlots = useMemo(
     () => slots.filter((s) => s.date === selectedDateStr),
@@ -157,16 +157,6 @@ export default function DoctorSchedule() {
         slotId: slot.id,
       });
     });
-
-    const mockLeave: DayEvent = {
-      id: 'leave-lunch',
-      kind: 'leave',
-      startTime: '12:30',
-      endTime: '13:30',
-      title: t('schedulePage.lunchBreak'),
-      subtitle: t('schedulePage.timeOffBlocked'),
-    };
-    events.push(mockLeave);
 
     events.sort((a, b) => {
       const [ah, am] = a.startTime.split(':').map(Number);
@@ -244,7 +234,6 @@ export default function DoctorSchedule() {
 
   return (
     <div className="max-w-lg mx-auto pb-24">
-      {/* Header: calendar icon + title, headset, + button */}
       <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-100 bg-white">
         <div className="flex items-center gap-2 min-w-0">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600" aria-hidden>
@@ -252,25 +241,13 @@ export default function DoctorSchedule() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
           </span>
-          <h1 className="text-lg font-bold text-gray-900 truncate">{t('schedulePage.title')}</h1>
+          <h1 className="text-lg font-bold text-gray-900 truncate">{t('doctorSchedule.title')}</h1>
         </div>
-        <div className="flex items-center gap-1">
-          <button type="button" className="p-2 rounded-full hover:bg-gray-100 text-gray-600" aria-label="Support">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowAddSlot(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700"
-            aria-label={t('schedulePage.addSlot')}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-        </div>
+        <button type="button" className="p-2 rounded-full hover:bg-gray-100 text-gray-600" aria-label={t('common.search')}>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </button>
       </div>
 
       <div className="px-4 py-4 space-y-4">
@@ -295,21 +272,21 @@ export default function DoctorSchedule() {
           </button>
         </div>
 
-        {/* Weekly / Monthly toggle */}
+        {/* Day / Week / Month toggle */}
         <div className="flex rounded-lg bg-gray-100 p-1">
           <button
             type="button"
             onClick={() => setViewMode('weekly')}
             className={`flex-1 py-2 rounded-md text-sm font-medium transition ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600'}`}
           >
-            {t('schedulePage.weekly')}
+            {t('doctorSchedule.day')}
           </button>
           <button
             type="button"
             onClick={() => setViewMode('monthly')}
             className={`flex-1 py-2 rounded-md text-sm font-medium transition ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600'}`}
           >
-            {t('schedulePage.monthly')}
+            {t('doctorSchedule.month')}
           </button>
         </div>
 
@@ -336,9 +313,8 @@ export default function DoctorSchedule() {
                   key={d.getTime()}
                   type="button"
                   onClick={() => setSelectedDate(new Date(d))}
-                  className={`flex flex-col items-center py-2 rounded-lg text-sm font-medium transition ${
-                    isSelected(d) ? 'bg-blue-600 text-white' : isToday(d) ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`flex flex-col items-center py-2 rounded-lg text-sm font-medium transition ${isSelected(d) ? 'bg-blue-600 text-white' : isToday(d) ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   {d.getDate()}
                   {hasEventOnDay(d) && (
@@ -384,6 +360,43 @@ export default function DoctorSchedule() {
           )}
         </div>
 
+        {/* Today's work shifts */}
+        {(daySlots.length > 0 || dayAppointments.length > 0) && (
+          <div>
+            <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">{t('doctorSchedule.todayShifts')}</h3>
+            <div className="space-y-2">
+              {daySlots.slice(0, 2).map((slot) => (
+                <div key={slot.id} className="rounded-xl bg-gray-100 p-3 flex items-center justify-between">
+                  <span className="font-medium text-gray-900">
+                    {slot.startTime?.startsWith('08') || slot.startTime?.startsWith('09') ? t('doctorSchedule.morningShift') : t('doctorSchedule.afternoonShift')}: {slot.startTime} - {slot.endTime}
+                  </span>
+                  <span className="text-sm text-gray-600">{t('doctorSchedule.examRoom', { num: '01' })}</span>
+                </div>
+              ))}
+              {daySlots.length === 0 && dayAppointments.length > 0 && (
+                <div className="rounded-xl bg-gray-100 p-3">
+                  <span className="text-sm text-gray-600">{t('doctorSchedule.morningShift')} 08:00 - 12:00</span>
+                  <span className="text-sm text-gray-500 ml-2">({t('doctorSchedule.examRoom', { num: '01' })})</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Patient list */}
+        {dayAppointments.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-gray-500 uppercase">
+                {t('doctorSchedule.patientList')} ({dayAppointments.length})
+              </h3>
+              <button type="button" className="text-sm font-medium text-blue-600 hover:underline">
+                {t('doctorSchedule.viewAll')}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Add slot form */}
         {showAddSlot && selectedDateStr && (
           <form onSubmit={addSlot} className="rounded-xl border border-gray-200 bg-white p-4 flex flex-wrap items-end gap-4">
@@ -411,17 +424,26 @@ export default function DoctorSchedule() {
                 className={`rounded-xl border border-gray-200 bg-white overflow-hidden flex ${ev.kind === 'cancelled' ? 'opacity-75' : ''}`}
               >
                 <span
-                  className={`w-1 shrink-0 ${
-                    ev.kind === 'booked' ? 'bg-blue-500' : ev.kind === 'available' ? 'bg-green-500' : ev.kind === 'leave' ? 'bg-amber-400' : 'bg-gray-400'
-                  }`}
+                  className={`w-1 shrink-0 ${ev.kind === 'booked' ? 'bg-blue-500' : ev.kind === 'available' ? 'bg-green-500' : ev.kind === 'leave' ? 'bg-amber-400' : 'bg-gray-400'
+                    }`}
                   aria-hidden
                 />
                 <div className="flex-1 min-w-0 p-4 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{ev.title}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium text-gray-900 truncate">{ev.title}</p>
+                      {ev.kind === 'booked' && ev.appointmentId && (() => {
+                        const appt = dayAppointments.find((a) => a.id === ev.appointmentId);
+                        const status = appt?.status;
+                        const label = status === 'in_progress' ? t('doctorSchedule.statusExamining') : status === 'confirmed' ? t('doctorSchedule.statusWaiting') : status === 'completed' ? t('doctorSchedule.statusCompleted') : null;
+                        if (!label) return null;
+                        const bg = status === 'in_progress' ? 'bg-amber-100 text-amber-800' : status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
+                        return <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${bg}`}>{label}</span>;
+                      })()}
+                    </div>
                     <p className={`text-sm truncate ${ev.kind === 'cancelled' ? 'text-gray-500' : 'text-gray-500'}`}>{ev.subtitle}</p>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {formatTime(ev.startTime)} – {formatTime(ev.endTime)}
+                      {formatTime(ev.startTime)} – {formatTime(ev.endTime)} ({t('doctorSchedule.minutes', { count: String(slotDuration(ev.startTime, ev.endTime)) })})
                     </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

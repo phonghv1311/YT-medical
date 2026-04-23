@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SequelizeModule } from '@nestjs/sequelize';
+import type { Dialect } from 'sequelize';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bullmq';
 
@@ -37,6 +38,7 @@ import { Review } from './database/models/review.model.js';
 import { Feedback } from './database/models/feedback.model.js';
 import { ChatMessage } from './database/models/chat-message.model.js';
 import { ActivityLog } from './database/models/activity-log.model.js';
+import { NewsArticle } from './database/models/news-article.model.js';
 
 import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -55,6 +57,12 @@ import { GatewayModule } from './gateway/gateway.module.js';
 import { SearchModule } from './search/search.module.js';
 import { FeedbackModule } from './feedback/feedback.module.js';
 import { StaffModule } from './staff/staff.module.js';
+import { ApprovalsModule } from './approvals/approvals.module.js';
+import { NewsModule } from './news/news.module.js';
+import { ProductsModule } from './products/products.module.js';
+import { ConversationsModule } from './conversations/conversations.module.js';
+import { ReportsModule } from './reports/reports.module.js';
+import { AppController } from './app.controller.js';
 
 @Module({
   imports: [
@@ -62,25 +70,29 @@ import { StaffModule } from './staff/staff.module.js';
 
     SequelizeModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        dialect: 'mysql',
-        host: config.get<string>('database.host'),
-        port: config.get<number>('database.port'),
-        username: config.get<string>('database.username'),
-        password: config.get<string>('database.password'),
-        database: config.get<string>('database.database'),
-        models: [
-          Role, Permission, RolePermission, User, Customer, Doctor, Staff,
-          Hospital, Department, DoctorDepartment, DoctorQualification, DoctorCertificate,
-          Specialization, DoctorSpecialization, Schedule, AvailabilitySlot,
-          FamilyMember, Appointment, MedicalRecord, Prescription, PatientStatus,
-          PaymentMethod, Package, UserPackage, Transaction, Tip,
-          Notification, Review, Feedback, ChatMessage, ActivityLog,
-        ],
-        autoLoadModels: true,
-        synchronize: config.get<string>('NODE_ENV') !== 'production',
-        logging: config.get<string>('NODE_ENV') === 'development' ? console.log : false,
-      }),
+      useFactory: (config: ConfigService) => {
+        const dialect = (config.get<string>('database.dialect') ?? 'mysql') as Dialect;
+        return {
+          dialect,
+          host: config.get<string>('database.host'),
+          port: config.get<number>('database.port'),
+          username: config.get<string>('database.username'),
+          password: config.get<string>('database.password'),
+          database: config.get<string>('database.database'),
+          models: [
+            Role, Permission, RolePermission, User, Customer, Doctor, Staff,
+            Hospital, Department, DoctorDepartment, DoctorQualification, DoctorCertificate,
+            Specialization, DoctorSpecialization, Schedule, AvailabilitySlot,
+            FamilyMember, Appointment, MedicalRecord, Prescription, PatientStatus,
+            PaymentMethod, Package, UserPackage, Transaction, Tip,
+            Notification, Review, Feedback, ChatMessage, ActivityLog,
+            NewsArticle,
+          ],
+          autoLoadModels: true,
+          synchronize: config.get<string>('NODE_ENV') !== 'production',
+          logging: config.get<string>('NODE_ENV') === 'development' ? console.log : false,
+        };
+      },
     }),
 
     MongooseModule.forRootAsync({
@@ -102,8 +114,8 @@ import { StaffModule } from './staff/staff.module.js';
     }),
 
     AuthModule,
-    UsersModule,
     HospitalsModule,
+    UsersModule,
     DepartmentsModule,
     DoctorsModule,
     PatientsModule,
@@ -118,6 +130,12 @@ import { StaffModule } from './staff/staff.module.js';
     SearchModule,
     FeedbackModule,
     StaffModule,
+    ApprovalsModule,
+    NewsModule,
+    ProductsModule,
+    ConversationsModule,
+    ReportsModule,
   ],
+  controllers: [AppController],
 })
 export class AppModule { }

@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, ParseIntPipe, UseInterceptors, UploadedFile, BadRequestException,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, ParseIntPipe, UseInterceptors, UploadedFile, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -107,6 +107,20 @@ export class DoctorsController {
   @Roles('doctor')
   updateMeOnboarding(@CurrentUser('id') userId: number, @Body() dto: DoctorOnboardingDto) {
     return this.doctorsService.updateOnboarding(userId, dto);
+  }
+
+  @Get('me/rules')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
+  getMeRules() {
+    return [];
+  }
+
+  @Get('me/rules/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
+  getMeRuleById(@Param('id') _id: string) {
+    throw new NotFoundException('Rule not found');
   }
 
   @Get('me/certificates')

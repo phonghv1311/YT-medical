@@ -49,6 +49,12 @@ export class ActivityLog extends Model {
   declare details: string | null;
 
   @Column({
+    type: DataType.STRING(1000),
+    allowNull: true,
+  })
+  declare reason: string | null;
+
+  @Column({
     type: DataType.STRING,
     allowNull: true,
   })

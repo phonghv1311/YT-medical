@@ -43,8 +43,10 @@ export default function SearchResults() {
   }, []);
 
   useEffect(() => {
+    const ctrl = new AbortController();
     setInputValue(q);
     runSearch(q);
+    return () => ctrl.abort();
   }, [q, runSearch]);
 
   const handleSearch = (e: React.FormEvent) => {

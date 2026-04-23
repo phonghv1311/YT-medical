@@ -7,6 +7,7 @@ import { UsersAvatarService } from './users-avatar.service.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto.js';
+import { DeactivateUserDto } from './dto/deactivate-user.dto.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { JwtAuthGuard, RolesGuard } from '../common/guards/index.js';
@@ -63,42 +64,103 @@ export class UsersController {
   @Get('users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
-  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.usersService.findAll(page ? +page : 1, limit ? +limit : 20);
+  findAll(
+    @CurrentUser('id') requesterId: number,
+    @CurrentUser('role') requesterRole: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usersService.findAll(page ? +page : 1, limit ? +limit : 20, {
+      requesterRole,
+      requesterId,
+    });
   }
 
   @Get('users/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
-  getUserById(@Param('id', ParseIntPipe) id: number) {
+  async getUserById(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('id') requesterId: number,
+    @CurrentUser('role') requesterRole: string,
+  ) {
+    if (requesterRole === 'admin') {
+      await this.usersService.assertUserInHospitalScope(id, requesterId);
+    }
     return this.usersService.getProfile(id);
   }
 
   @Post('users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
-  createUser(@Body() dto: CreateUserDto) {
-    return this.usersService.createUser(dto);
+  createUser(
+    @Body() dto: CreateUserDto,
+    @CurrentUser('id') requesterId: number,
+    @CurrentUser('role') requesterRole: string,
+  ) {
+    return this.usersService.createUser(dto, { requesterRole, requesterId });
   }
 
-  @Put('users/:id')
+  @Put('users/:id/deactivate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
-  updateUser(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateUserDto) {
-    return this.usersService.updateUser(id, dto);
+  async deactivateUser(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DeactivateUserDto,
+    @CurrentUser('id') performedByUserId: number,
+    @CurrentUser('role') requesterRole: string,
+  ) {
+    if (requesterRole === 'admin') {
+      await this.usersService.assertUserInHospitalScope(id, performedByUserId);
+    }
+    return this.usersService.deactivateUser(id, dto, performedByUserId);
   }
 
   @Put('users/:id/reset-password')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
-  adminResetPassword(@Param('id', ParseIntPipe) id: number, @Body() dto: AdminResetPasswordDto) {
+  async adminResetPassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AdminResetPasswordDto,
+    @CurrentUser('id') requesterId: number,
+    @CurrentUser('role') requesterRole: string,
+  ) {
+    if (requesterRole === 'admin') {
+      await this.usersService.assertUserInHospitalScope(id, requesterId);
+    }
     return this.usersService.adminResetPassword(id, dto.newPassword);
+  }
+
+  @Put('users/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'superadmin')
+  async updateUser(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser('id') performedByUserId: number,
+    @CurrentUser('role') requesterRole: string,
+  ) {
+    if (requesterRole === 'admin') {
+      // Ensure target user is inside the same hospital before allowing mutations.
+      await this.usersService.assertUserInHospitalScope(id, performedByUserId);
+      return this.usersService.updateUser(id, dto, performedByUserId);
+    }
+    return this.usersService.updateUser(id, dto, performedByUserId);
   }
 
   @Delete('users/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
-  deleteUser(@Param('id', ParseIntPipe) id: number) {
-    return this.usersService.deleteUser(id);
+  async deleteUser(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason?: string },
+    @CurrentUser('id') performedByUserId: number,
+    @CurrentUser('role') requesterRole: string,
+  ) {
+    if (requesterRole === 'admin') {
+      await this.usersService.assertUserInHospitalScope(id, performedByUserId);
+      return this.usersService.deleteUser(id, body?.reason, performedByUserId);
+    }
+    return this.usersService.deleteUser(id, body?.reason, performedByUserId);
   }
 }

@@ -8,11 +8,21 @@ import { Role } from '../database/models/role.model.js';
 import { Customer } from '../database/models/customer.model.js';
 import { Doctor } from '../database/models/doctor.model.js';
 import { DoctorDepartment } from '../database/models/doctor-department.model.js';
+import { Staff } from '../database/models/staff.model.js';
+import { Hospital } from '../database/models/hospital.model.js';
+import { Department } from '../database/models/department.model.js';
+import { DoctorSpecialization } from '../database/models/doctor-specialization.model.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
+import { LogsModule } from '../logs/logs.module.js';
 
 @Module({
-  imports: [SequelizeModule.forFeature([User, Role, Customer, Doctor, DoctorDepartment])],
+  imports: [
+    SequelizeModule.forFeature([User, Role, Customer, Doctor, DoctorDepartment, Staff, Hospital, Department, DoctorSpecialization]),
+    NotificationsModule,
+    LogsModule,
+  ],
   controllers: [UsersController],
   providers: [UsersService, UsersAvatarService],
   exports: [UsersService],
 })
-export class UsersModule {}
+export class UsersModule { }

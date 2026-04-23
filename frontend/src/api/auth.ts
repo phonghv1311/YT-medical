@@ -29,7 +29,7 @@ export const authApi = {
 
   getProfile: getProfileDeduped,
 
-  updateProfile: (data: { firstName?: string; lastName?: string; phone?: string }) =>
+  updateProfile: (data: { firstName?: string; lastName?: string; phone?: string; address?: string }) =>
     api.put('/profile', data),
 
   changePassword: (data: { currentPassword: string; newPassword: string }) =>

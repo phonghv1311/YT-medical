@@ -76,6 +76,13 @@ export class StaffService {
     const existing = await this.userModel.findOne({ where: { email: dto.email } });
     if (existing) throw new BadRequestException('Email already registered');
 
+    if (dto.hospitalId != null && dto.departmentId != null) {
+      const department = await this.departmentModel.findByPk(dto.departmentId);
+      if (!department || department.hospitalId !== dto.hospitalId) {
+        throw new BadRequestException('departmentId does not belong to hospitalId');
+      }
+    }
+
     const hashed = await bcrypt.hash(dto.password, 10);
     const user = await this.userModel.create({
       email: dto.email,
@@ -116,9 +123,19 @@ export class StaffService {
       }
     }
 
+    const nextHospitalId = dto.hospitalId !== undefined ? dto.hospitalId : staff.hospitalId;
+    const nextDepartmentId = dto.departmentId !== undefined ? dto.departmentId : staff.departmentId;
+
+    if (nextHospitalId != null && nextDepartmentId != null) {
+      const department = await this.departmentModel.findByPk(nextDepartmentId);
+      if (!department || department.hospitalId !== nextHospitalId) {
+        throw new BadRequestException('departmentId does not belong to hospitalId');
+      }
+    }
+
     await staff.update({
-      hospitalId: dto.hospitalId !== undefined ? dto.hospitalId : staff.hospitalId,
-      departmentId: dto.departmentId !== undefined ? dto.departmentId : staff.departmentId,
+      hospitalId: nextHospitalId,
+      departmentId: nextDepartmentId,
       jobTitle: dto.jobTitle !== undefined ? dto.jobTitle : staff.jobTitle,
       position: dto.position !== undefined ? dto.position : staff.position,
       startDate: dto.startDate !== undefined ? dto.startDate : staff.startDate,

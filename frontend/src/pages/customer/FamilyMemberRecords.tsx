@@ -19,19 +19,21 @@ export default function FamilyMemberRecords() {
       setLoading(false);
       return;
     }
-    patientsApi.getFamilyMembers(user.id)
+    const ctrl = new AbortController();
+    patientsApi.getFamilyMembers(user.id, { signal: ctrl.signal })
       .then(({ data }) => {
         const list = data?.data ?? data ?? [];
         const arr = Array.isArray(list) ? list : [];
         const found = arr.find((m: FamilyMember) => String(m.id) === id);
         setMember(found ?? null);
       })
-      .catch(() => setMember(null))
+      .catch((err) => { if (err?.code !== 'ERR_CANCELED') setMember(null); })
       .finally(() => setLoading(false));
-    patientsApi.getMedicalRecords(user.id).then((r) => {
+    patientsApi.getMedicalRecords(user.id, { signal: ctrl.signal }).then((r) => {
       const d = r.data?.data ?? r.data ?? [];
       setRecords(Array.isArray(d) ? d : []);
-    }).catch(() => setRecords([]));
+    }).catch(() => {});
+    return () => ctrl.abort();
   }, [user, id]);
 
   if (loading) return <FullPageSkeleton />;

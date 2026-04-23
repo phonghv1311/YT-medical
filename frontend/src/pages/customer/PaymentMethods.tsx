@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { paymentsApi } from '../../api';
@@ -22,14 +22,21 @@ function CardIcon({ type }: { type: string }) {
   );
 }
 
-const paymentMethodsFetchCache: { promise: Promise<unknown> | null } = { promise: null };
-function getPaymentMethodsOnce() {
-  if (!paymentMethodsFetchCache.promise) {
-    paymentMethodsFetchCache.promise = paymentsApi.getPaymentMethods().finally(() => {
-      paymentMethodsFetchCache.promise = null;
-    });
+function normalizePaymentMethodsList(res: unknown): PaymentMethod[] {
+  if (!res || typeof res !== 'object') return [];
+  const r = res as { data?: unknown; paymentMethods?: unknown };
+  const raw = r.data ?? r.paymentMethods ?? (Array.isArray(res) ? res : null);
+  if (Array.isArray(raw)) {
+    return raw.map((item: Record<string, unknown>) => ({
+      id: Number(item.id),
+      userId: Number(item.userId),
+      type: String(item.type ?? ''),
+      provider: String(item.provider ?? ''),
+      last4: item.last4 != null ? String(item.last4) : undefined,
+      isDefault: Boolean(item.isDefault),
+    })) as PaymentMethod[];
   }
-  return paymentMethodsFetchCache.promise as ReturnType<typeof paymentsApi.getPaymentMethods>;
+  return [];
 }
 
 export default function PaymentMethods() {
@@ -40,7 +47,7 @@ export default function PaymentMethods() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ type: 'credit_card' as const, provider: '', last4: '' });
-  const fetchedRef = useRef(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const formatType = (type: string) => {
     if (type === 'credit_card' || type === 'card') return t('payments.creditCard');
@@ -50,15 +57,24 @@ export default function PaymentMethods() {
   };
 
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
     let cancelled = false;
-    getPaymentMethodsOnce()
+    setFetchError(null);
+    paymentsApi
+      .getPaymentMethods()
       .then((res) => {
-        if (!cancelled) setMethods(res.data?.data ?? res.data ?? []);
+        if (cancelled) return;
+        const list = normalizePaymentMethodsList(res?.data ?? res);
+        setMethods(list);
       })
-      .catch(() => { })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .catch(() => {
+        if (!cancelled) {
+          setFetchError(t('payments.loadFailed') ?? 'Could not load payment methods.');
+          setMethods([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -107,13 +123,22 @@ export default function PaymentMethods() {
           </button>
         </div>
 
+        {fetchError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            {fetchError}
+            <button type="button" onClick={() => window.location.reload()} className="mt-2 block font-medium text-amber-700 hover:underline">
+              {t('common.retry') ?? 'Retry'}
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
               <ListRowSkeleton key={i} lines={2} />
             ))}
           </div>
-        ) : methods.length === 0 ? (
+        ) : methods.length === 0 && !fetchError ? (
           <div className="rounded-2xl border border-gray-100 bg-white p-12 text-center shadow-sm">
             <p className="text-gray-500">{t('payments.noMethodsYet')}</p>
             <button
@@ -125,10 +150,10 @@ export default function PaymentMethods() {
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4" data-testid="payment-methods-list">
             {methods.map((m) => (
               <div
-                key={m.id}
+                key={m.id ?? `pm-${m.provider}-${m.last4 ?? 'x'}`}
                 className="relative rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition hover:shadow-md"
               >
                 {m.isDefault && (

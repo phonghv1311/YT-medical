@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useAppSelector } from '../../hooks/useAppDispatch';
+import { getRole } from '../../utils/auth';
 import { adminApi } from '../../api/admin';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { User } from '../../types';
@@ -32,14 +34,29 @@ type RoleTab = 'all' | 'doctor' | 'staff' | 'admin' | 'customer';
 
 export default function AdminUsers() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentUser = useAppSelector((s) => s.auth.user);
+  const isSuperadmin = getRole(currentUser) === 'superadmin';
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const limit = 50;
   const [search, setSearch] = useState('');
-  const [roleTab, setRoleTab] = useState<RoleTab>('all');
-  const [departmentFilter, setDepartmentFilter] = useState<string>('');
+  const roleTabParam = searchParams.get('roleTab') as RoleTab | null;
+  const [roleTab, setRoleTabState] = useState<RoleTab>(roleTabParam && ['all', 'admin', 'doctor', 'staff', 'customer'].includes(roleTabParam) ? roleTabParam : 'all');
+  const setRoleTab = (tab: RoleTab) => {
+    setRoleTabState(tab);
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'all') next.delete('roleTab'); else next.set('roleTab', tab);
+    setSearchParams(next, { replace: true });
+  };
+  useEffect(() => {
+    if (roleTabParam && roleTabParam !== roleTab && ['all', 'admin', 'doctor', 'staff', 'customer'].includes(roleTabParam)) setRoleTabState(roleTabParam as RoleTab);
+  }, [roleTabParam]);
+  const [hospitalFilterId, setHospitalFilterId] = useState<number | ''>('');
+  const [departmentFilterId, setDepartmentFilterId] = useState<number | ''>('');
   const [statusFilter, setStatusFilter] = useState<string>(''); // '', 'active', 'inactive'
 
   const [roles, setRoles] = useState<Role[]>([]);
@@ -50,6 +67,9 @@ export default function AdminUsers() {
   const [form, setForm] = useState<UserForm>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof UserForm, string>>>({});
   const [saving, setSaving] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
+  const [deactivateReason, setDeactivateReason] = useState('');
+  const [deactivating, setDeactivating] = useState(false);
 
   async function loadUsers(p = page, signal?: AbortSignal) {
     setLoading(true);
@@ -85,21 +105,20 @@ export default function AdminUsers() {
       const raw = data?.data ?? data;
       const list = raw?.roles ?? (Array.isArray(raw) ? raw : []);
       setRoles(list);
-    }).catch(() => {});
+    }).catch(() => { });
     return () => ctrl.abort();
   }, []);
 
   useEffect(() => {
-    if (!modal) return;
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     adminApi.getHospitals({ signal }).then(({ data }) => {
       if (signal.aborted) return;
       const list = data?.data ?? data;
       setHospitals(Array.isArray(list) ? list : []);
-    }).catch(() => {});
+    }).catch(() => { });
     return () => ctrl.abort();
-  }, [modal]);
+  }, []);
 
   useEffect(() => {
     if (form.hospitalId === '') {
@@ -116,9 +135,34 @@ export default function AdminUsers() {
     return () => ctrl.abort();
   }, [form.hospitalId]);
 
+  const [filterDepartments, setFilterDepartments] = useState<Department[]>([]);
+  useEffect(() => {
+    if (hospitalFilterId === '') {
+      setFilterDepartments([]);
+      return;
+    }
+    const ctrl = new AbortController();
+    const signal = ctrl.signal;
+    adminApi.getDepartments(hospitalFilterId, { signal }).then(({ data }) => {
+      if (signal.aborted) return;
+      const list = data?.data ?? data;
+      setFilterDepartments(Array.isArray(list) ? list : []);
+    }).catch(() => { if (!signal.aborted) setFilterDepartments([]); });
+    return () => ctrl.abort();
+  }, [hospitalFilterId]);
+
   function openCreate() {
-    const staffRoles = roles.filter((r) => STAFF_ROLE_NAMES.includes(r.name as (typeof STAFF_ROLE_NAMES)[number]));
-    const defaultRoleId = staffRoles[0]?.id ?? roles[0]?.id ?? 2;
+    const adminRole = roles.find((r) => r.name === 'admin');
+    const doctorRole = roles.find((r) => r.name === 'doctor');
+    const staffRole = roles.find((r) => r.name === 'staff');
+    const customerRole = roles.find((r) => r.name === 'customer');
+    const staffRolesForSelect = [adminRole, doctorRole, staffRole].filter(Boolean);
+    let defaultRoleId: number;
+    if (roleTab === 'admin') defaultRoleId = adminRole?.id ?? roles[0]?.id ?? 2;
+    else if (roleTab === 'doctor') defaultRoleId = doctorRole?.id ?? roles[0]?.id ?? 2;
+    else if (roleTab === 'staff') defaultRoleId = staffRole?.id ?? roles[0]?.id ?? 2;
+    else if (roleTab === 'customer') defaultRoleId = customerRole?.id ?? roles[0]?.id ?? 2;
+    else defaultRoleId = adminRole?.id ?? staffRolesForSelect[0]?.id ?? roles[0]?.id ?? 2;
     setForm({ ...emptyForm, roleId: defaultRoleId, hospitalId: '', departmentId: '' });
     setFormErrors({});
     setModal({ mode: 'create' });
@@ -151,7 +195,8 @@ export default function AdminUsers() {
     if (!form.lastName.trim()) errs.lastName = t('adminUsers.lastNameRequired');
     const role = roles.find((r) => r.id === form.roleId);
     const isStaffRole = role && STAFF_ROLE_NAMES.includes(role.name as (typeof STAFF_ROLE_NAMES)[number]);
-    if (modal?.mode === 'create' && isStaffRole && (form.hospitalId === '' || form.hospitalId == null)) {
+    const isAdminRole = role?.name === 'admin';
+    if (modal?.mode === 'create' && isStaffRole && !isAdminRole && (form.hospitalId === '' || form.hospitalId == null)) {
       errs.hospitalId = t('adminUsers.hospitalRequired');
     }
     setFormErrors(errs);
@@ -205,12 +250,42 @@ export default function AdminUsers() {
   }
 
   async function toggleActive(u: User) {
+    const isActive = (u as User & { isActive?: boolean }).isActive !== false;
+    if (isActive) {
+      setDeactivateTarget(u);
+      setDeactivateReason('');
+    } else {
+      try {
+        await adminApi.updateUser(u.id, { isActive: true });
+        loadUsers();
+      } catch (err) {
+        console.error('Failed to activate user', err);
+      }
+    }
+  }
+
+  function openDeactivateModal(u: User) {
+    setDeactivateTarget(u);
+    setDeactivateReason('');
+  }
+
+  async function confirmDeactivate() {
+    if (!deactivateTarget || !deactivateReason.trim()) return;
+    setDeactivating(true);
     try {
-      await adminApi.updateUser(u.id, { isActive: !(u as User & { isActive?: boolean }).isActive });
+      await adminApi.deactivateUser(deactivateTarget.id, { reason: deactivateReason.trim() });
+      setDeactivateTarget(null);
+      setDeactivateReason('');
       loadUsers();
     } catch (err) {
-      console.error('Failed to toggle user', err);
+      console.error('Failed to deactivate user', err);
+    } finally {
+      setDeactivating(false);
     }
+  }
+
+  async function handleDeleteUser(u: User) {
+    openDeactivateModal(u);
   }
 
   function updateField<K extends keyof UserForm>(field: K, value: UserForm[K]) {
@@ -233,13 +308,29 @@ export default function AdminUsers() {
     return typeof r === 'string' ? r : (r as { name?: string })?.name ?? '';
   };
 
+  const getStaffHospitalId = (u: User) => (u as User & { staff?: { hospitalId?: number } }).staff?.hospitalId;
+  const getStaffDepartmentId = (u: User) => (u as User & { staff?: { departmentId?: number } }).staff?.departmentId;
+  const getDoctorHospitalId = (u: User) =>
+    (u as User & { doctor?: { doctorDepartments?: { department?: { hospitalId?: number } }[] } }).doctor?.doctorDepartments?.[0]?.department?.hospitalId;
+  const getDoctorDepartmentId = (u: User) =>
+    (u as User & { doctor?: { doctorDepartments?: { department?: { id?: number } }[] } }).doctor?.doctorDepartments?.[0]?.department?.id;
+
   const filteredUsers = users.filter((u) => {
     const roleName = getRoleName(u).toLowerCase();
+    if (roleName === 'superadmin') return false;
     if (roleTab !== 'all') {
       if (roleTab === 'doctor' && roleName !== 'doctor') return false;
       if (roleTab === 'staff' && roleName !== 'staff') return false;
-      if (roleTab === 'admin' && !['admin', 'superadmin'].includes(roleName)) return false;
+      if (roleTab === 'admin' && roleName !== 'admin') return false;
       if (roleTab === 'customer' && roleName !== 'customer') return false;
+    }
+    if (hospitalFilterId !== '') {
+      const uHospitalId = getStaffHospitalId(u) ?? getDoctorHospitalId(u);
+      if (uHospitalId !== hospitalFilterId) return false;
+    }
+    if (departmentFilterId !== '') {
+      const uDeptId = getStaffDepartmentId(u) ?? getDoctorDepartmentId(u);
+      if (uDeptId !== departmentFilterId) return false;
     }
     const isActive = (u as User & { isActive?: boolean }).isActive !== false;
     if (statusFilter === 'active' && !isActive) return false;
@@ -265,15 +356,25 @@ export default function AdminUsers() {
     );
   }
 
-  const hasFilters = roleTab !== 'all' || statusFilter !== '' || search.trim() !== '';
+  const hasFilters = roleTab !== 'all' || statusFilter !== '' || search.trim() !== '' || hospitalFilterId !== '' || departmentFilterId !== '';
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-blue-600" aria-hidden>
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-        </span>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('employeeDirectory.title')}</h1>
+    <div className="space-y-4 pb-24">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link to="/admin" className="p-2 -ml-2 rounded-lg hover:bg-gray-100 shrink-0" aria-label={t('common.back')}>
+            <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          </Link>
+          <h1 className="text-xl font-bold text-gray-900 truncate">{t('admin.userManagement')}</h1>
+        </div>
+        <button
+          type="button"
+          onClick={openCreate}
+          className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+          {t('adminDashboard.addUser')}
+        </button>
       </div>
 
       <div className="relative">
@@ -282,31 +383,26 @@ export default function AdminUsers() {
         </span>
         <input
           type="search"
-          placeholder={t('employeeDirectory.searchPlaceholder')}
+          placeholder={t('admin.searchUsers')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
 
-      <button onClick={openCreate} className="w-full py-3 rounded-xl bg-blue-600 text-white font-medium flex items-center justify-center gap-2 hover:bg-blue-700 transition">
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
-        {t('employeeDirectory.addEmployee')}
-      </button>
-
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-        {(['all', 'doctor', 'staff', 'admin', 'customer'] as const).map((tab) => (
+        {(['all', 'admin', 'doctor', 'staff', 'customer'] as const).map((tab) => (
           <button
             key={tab}
             type="button"
-            onClick={() => setRoleTab(tab)}
-            className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition ${roleTab === tab ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            onClick={() => setRoleTab(tab === 'all' ? 'all' : tab)}
+            className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition ${roleTab === tab ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}
           >
-            {tab === 'all' && t('employeeDirectory.allStaff')}
-            {tab === 'doctor' && t('employeeDirectory.doctors')}
-            {tab === 'staff' && t('employeeDirectory.nurses')}
-            {tab === 'admin' && t('employeeDirectory.administration')}
-            {tab === 'customer' && t('adminUsers.role')}
+            {tab === 'all' && t('admin.allFilter')}
+            {tab === 'admin' && 'Admin'}
+            {tab === 'doctor' && t('auth.doctor')}
+            {tab === 'staff' && (t('employeeDirectory.employees') || 'Employees')}
+            {tab === 'customer' && t('auth.patient')}
           </button>
         ))}
       </div>
@@ -317,8 +413,20 @@ export default function AdminUsers() {
           <option value="active">{t('admin.active')}</option>
           <option value="inactive">{t('admin.inactive')}</option>
         </select>
+        <select value={hospitalFilterId === '' ? '' : hospitalFilterId} onChange={(e) => { const v = e.target.value; setHospitalFilterId(v === '' ? '' : Number(v)); setDepartmentFilterId(''); }} className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-white">
+          <option value="">{t('admin.hospital')} — {t('common.select')}</option>
+          {hospitals.filter((h) => (h as Hospital & { isActive?: boolean }).isActive !== false).map((h) => (
+            <option key={h.id} value={h.id}>{h.name}</option>
+          ))}
+        </select>
+        <select value={departmentFilterId === '' ? '' : departmentFilterId} onChange={(e) => { const v = e.target.value; setDepartmentFilterId(v === '' ? '' : Number(v)); }} className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-white">
+          <option value="">{t('adminUsers.department')} — {t('common.select')}</option>
+          {filterDepartments.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
         {hasFilters && (
-          <button type="button" onClick={() => { setSearch(''); setRoleTab('all'); setStatusFilter(''); }} className="text-sm text-blue-600 hover:underline">
+          <button type="button" onClick={() => { setSearch(''); setRoleTab('all'); setStatusFilter(''); setHospitalFilterId(''); setDepartmentFilterId(''); }} className="text-sm text-blue-600 hover:underline">
             {t('employeeDirectory.clearAll')}
           </button>
         )}
@@ -329,44 +437,79 @@ export default function AdminUsers() {
       ) : filteredUsers.length === 0 ? (
         <p className="text-gray-500 py-8">{t('employeeDirectory.noMatch')}</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-3">
           {filteredUsers.map((u) => {
             const isActive = (u as User & { isActive?: boolean }).isActive !== false;
-            const roleLabel = getRoleName(u) || '—';
+            const roleName = getRoleName(u).toLowerCase();
             const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ') || '—';
+            const roleBadgeClass = roleName === 'admin' || roleName === 'superadmin' ? 'bg-blue-100 text-blue-800' : roleName === 'doctor' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700';
+            const roleBadgeLabel = roleName === 'customer' ? t('auth.patient') : roleName === 'doctor' ? t('auth.doctor') : 'Admin';
+            const hospitalName = (u as User & { staff?: { hospital?: { name?: string } }; doctor?: { doctorDepartments?: { department?: { hospital?: { name?: string } } }[] } }).staff?.hospital?.name
+              ?? (u as User & { doctor?: { doctorDepartments?: { department?: { hospital?: { name?: string } } }[] } }).doctor?.doctorDepartments?.[0]?.department?.hospital?.name
+              ?? '—';
+            const dateOfBirth = (u as User & { customer?: { dateOfBirth?: string } }).customer?.dateOfBirth ?? '—';
+            const position = (u as User & { staff?: { position?: string } }).staff?.position ?? '—';
             return (
-              <div key={u.id} className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-                <Link to={`/admin/users/${u.id}`} state={{ user: u }} className="block p-4 flex-1 flex flex-col min-w-0 hover:bg-gray-50/50 transition">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-semibold text-sm shrink-0">
-                      {(u.firstName?.[0] ?? '') + (u.lastName?.[0] ?? '') || '?'}
-                    </div>
-                    <div className="min-w-0 flex-1">
+              <div key={u.id} className="rounded-xl bg-white border border-gray-200 p-4 shadow-sm relative group">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/admin/users/${u.id}`, { state: { user: u } })}
+                  className="absolute inset-0 rounded-xl cursor-pointer z-0 focus:outline-none"
+                  aria-label={fullName}
+                />
+                <div className="relative z-10 flex items-start gap-3 pointer-events-none">
+                  <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold text-sm shrink-0 pointer-events-none">
+                    {(u.firstName?.[0] ?? '') + (u.lastName?.[0] ?? '') || '?'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h2 className="font-bold text-gray-900 truncate" title={fullName}>{fullName}</h2>
-                      <p className="text-sm text-gray-500 truncate" title={u.email}>{u.email}</p>
+                      <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold uppercase ${roleBadgeClass}`}>{roleBadgeLabel}</span>
                     </div>
+                    <p className="text-sm text-gray-500 truncate mt-0.5" title={u.email}>{u.email ?? '—'}</p>
+                    <ul className="text-xs text-gray-500 mt-1.5 space-y-0.5">
+                      <li><span className="text-gray-400">{t('admin.hospital')}:</span> {hospitalName}</li>
+                      <li><span className="text-gray-400">{t('adminUsers.dateOfBirthShort')}:</span> {dateOfBirth}</li>
+                      <li><span className="text-gray-400">{t('admin.phone')}:</span> {u.phone ?? '—'}</li>
+                      <li><span className="text-gray-400">{t('admin.position')}:</span> {position}</li>
+                      <li><span className="text-gray-400">{t('admin.status')}:</span> {isActive ? t('admin.active') : t('admin.inactive')}</li>
+                    </ul>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">#{String(u.id).padStart(5, '0')}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold uppercase bg-indigo-100 text-indigo-700 capitalize">{roleLabel}</span>
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold uppercase ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {isActive ? t('employeeDirectory.onDuty') : t('employeeDirectory.offShift')}
-                    </span>
+                  <div className="flex items-center gap-2 pointer-events-auto shrink-0">
+                    <button
+                      type="button"
+                      data-action="no-navigate"
+                      onClick={(e) => { e.stopPropagation(); toggleActive(u); }}
+                      className={`shrink-0 w-11 h-6 rounded-full transition ${isActive ? 'bg-blue-600' : 'bg-gray-200'}`}
+                      aria-label={isActive ? t('admin.active') : t('admin.inactive')}
+                    >
+                      <span className={`block w-5 h-5 rounded-full bg-white shadow mt-0.5 transition-transform ${isActive ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                    <button
+                      type="button"
+                      data-action="no-navigate"
+                      onClick={(e) => { e.stopPropagation(); openDeactivateModal(u); }}
+                      className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition"
+                      aria-label={t('common.delete')}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
                   </div>
-                </Link>
-                <div className="px-4 pb-4 flex gap-2" onClick={(e) => e.preventDefault()}>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(u); }} className="flex-1 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200 transition">
-                    {t('common.edit')}
-                  </button>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); toggleActive(u); }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition min-w-0 sm:min-w-[80px] ${isActive ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}>
-                    {isActive ? t('adminUsers.deactivate') : t('adminUsers.activate')}
-                  </button>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={openCreate}
+        className="fixed bottom-20 right-4 w-14 h-14 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg hover:bg-blue-700 z-30"
+        aria-label={t('adminDashboard.addUser')}
+      >
+        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+      </button>
 
       {users.length > 0 && (
         <p className="text-center text-sm text-gray-500">
@@ -379,6 +522,34 @@ export default function AdminUsers() {
           <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="px-3 py-1 rounded-lg border text-sm disabled:opacity-40 hover:bg-gray-50 transition">Prev</button>
           <span className="text-sm text-gray-600">Page {page} of {totalPages}</span>
           <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="px-3 py-1 rounded-lg border text-sm disabled:opacity-40 hover:bg-gray-50 transition">Next</button>
+        </div>
+      )}
+
+      {deactivateTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm" onClick={() => !deactivating && setDeactivateTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900">{t('adminUsers.deactivateTitle')}</h3>
+            <p className="text-sm text-gray-600">
+              {t('adminUsers.deactivateMessage', { name: [deactivateTarget.firstName, deactivateTarget.lastName].filter(Boolean).join(' ') || deactivateTarget.email })}
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('adminUsers.deactivateReasonLabel')} *</label>
+              <textarea
+                value={deactivateReason}
+                onChange={(e) => setDeactivateReason(e.target.value)}
+                placeholder={t('adminUsers.deactivateReasonPlaceholder')}
+                rows={3}
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <p className="text-xs text-gray-500">{t('adminUsers.deactivateNotify')}</p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setDeactivateTarget(null)} disabled={deactivating} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{t('common.cancel')}</button>
+              <button type="button" onClick={confirmDeactivate} disabled={deactivating || !deactivateReason.trim()} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                {deactivating ? t('common.loading') : t('adminUsers.deactivateConfirm')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -422,11 +593,11 @@ export default function AdminUsers() {
                   <select value={form.roleId} onChange={(e) => updateField('roleId', Number(e.target.value))} className="w-full rounded-lg border border-gray-300 shadow-sm text-sm px-4 py-2 focus:ring-blue-500 focus:border-blue-500 capitalize">
                     {modal.mode === 'create'
                       ? roles.filter((r) => STAFF_ROLE_NAMES.includes(r.name as (typeof STAFF_ROLE_NAMES)[number])).map((r) => (
-                        <option key={r.id} value={r.id}>{r.name === 'admin' ? t('adminUsers.roleAdministrator') : r.name === 'doctor' ? t('adminUsers.rolePhysician') : r.name === 'staff' ? t('adminUsers.roleStaffMember') : r.name}</option>
-                      ))
+                          <option key={r.id} value={r.id}>{r.name === 'admin' ? t('adminUsers.roleAdministrator') : r.name === 'doctor' ? t('adminUsers.rolePhysician') : r.name === 'staff' ? t('adminUsers.roleStaffMember') : r.name}</option>
+                        ))
                       : roles.map((r) => (
-                        <option key={r.id} value={r.id}>{r.name}</option>
-                      ))}
+                          <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
                   </select>
                 </div>
 

@@ -47,7 +47,7 @@ export class StaffController {
   constructor(
     private readonly staffService: StaffService,
     private readonly staffUploadService: StaffUploadService,
-  ) {}
+  ) { }
 
   /** Current user's staff profile (staff role; admin/superadmin get 404 if no staff record). */
   @Get('me')
@@ -79,13 +79,11 @@ export class StaffController {
       page: page ? +page : undefined,
       limit: limit ? +limit : undefined,
     };
-    if (role === 'staff') {
+    if (role === 'staff' || role === 'admin') {
       const myStaff = await this.staffService.findByUserId(userId);
       const myHospitalId = myStaff?.hospitalId ?? undefined;
-      return this.staffService.findAll({
-        ...params,
-        hospitalId: myHospitalId ?? params.hospitalId,
-      });
+      if (!myHospitalId) throw new ForbiddenException('Access denied');
+      return this.staffService.findAll({ ...params, hospitalId: myHospitalId });
     }
     return this.staffService.findAll(params);
   }
@@ -98,14 +96,12 @@ export class StaffController {
     @CurrentUser('id') userId: number,
     @CurrentUser('role') role: string,
   ) {
-    if (role === 'staff') {
+    if (role === 'staff' || role === 'admin') {
       const myStaff = await this.staffService.findByUserId(userId);
       if (!myStaff) throw new ForbiddenException('Staff profile required');
       if (myStaff.id !== id) {
         const target = await this.staffService.findOne(id);
-        if (target.hospitalId == null || target.hospitalId !== myStaff.hospitalId) {
-          throw new ForbiddenException('Access denied');
-        }
+        if (target.hospitalId == null || target.hospitalId !== myStaff.hospitalId) throw new ForbiddenException('Access denied');
       }
     }
     return this.staffService.findOne(id);
@@ -114,7 +110,16 @@ export class StaffController {
   /** Create staff. Admin/superadmin only. */
   @Post()
   @Roles('admin', 'superadmin')
-  create(@Body() dto: CreateStaffDto) {
+  async create(
+    @Body() dto: CreateStaffDto,
+    @CurrentUser('id') userId: number,
+    @CurrentUser('role') role: string,
+  ) {
+    if (role === 'admin') {
+      const myStaff = await this.staffService.findByUserId(userId);
+      if (!myStaff?.hospitalId) throw new ForbiddenException('Access denied');
+      dto.hospitalId = myStaff.hospitalId;
+    }
     return this.staffService.create(dto);
   }
 
@@ -131,13 +136,29 @@ export class StaffController {
       const myStaff = await this.staffService.findByUserId(userId);
       if (!myStaff || myStaff.id !== id) throw new ForbiddenException('Can only update own profile');
     }
+    if (role === 'admin') {
+      const myStaff = await this.staffService.findByUserId(userId);
+      if (!myStaff?.hospitalId) throw new ForbiddenException('Access denied');
+      const target = await this.staffService.findOne(id);
+      if (!target?.hospitalId || target.hospitalId !== myStaff.hospitalId) throw new ForbiddenException('Access denied');
+    }
     return this.staffService.update(id, dto);
   }
 
   /** Deactivate staff. Admin/superadmin only. */
   @Delete(':id')
   @Roles('admin', 'superadmin')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('id') userId: number,
+    @CurrentUser('role') role: string,
+  ) {
+    if (role === 'admin') {
+      const myStaff = await this.staffService.findByUserId(userId);
+      if (!myStaff?.hospitalId) throw new ForbiddenException('Access denied');
+      const target = await this.staffService.findOne(id);
+      if (!target?.hospitalId || target.hospitalId !== myStaff.hospitalId) throw new ForbiddenException('Access denied');
+    }
     return this.staffService.remove(id);
   }
 }

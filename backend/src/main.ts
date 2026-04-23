@@ -8,8 +8,18 @@ import { AppModule } from './app.module.js';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Disable ETag so GET endpoints do not return 304 "Not Modified" for cached requests.
+  const httpAdapter = app.getHttpAdapter();
+  const instance = httpAdapter.getInstance() as { set?: (key: string, val: unknown) => void };
+  instance.set?.('etag', false);
+
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
   );
 
   const config = app.get(ConfigService);

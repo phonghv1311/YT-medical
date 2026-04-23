@@ -39,3 +39,4 @@ export { Review } from './review.model.js';
 export { Feedback, FeedbackStatus } from './feedback.model.js';
 export { ChatMessage } from './chat-message.model.js';
 export { ActivityLog } from './activity-log.model.js';
+export { NewsArticle } from './news-article.model.js';

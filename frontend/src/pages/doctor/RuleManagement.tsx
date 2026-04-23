@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { doctorsApi } from '../../api/doctors';
 
 type StatusFilter = 'All Status' | 'Clinical' | 'Admin';
 
@@ -11,18 +12,55 @@ interface RuleCard {
   modified: string;
 }
 
-const MOCK_RULES: RuleCard[] = [
-  { id: '1', title: 'Hypertension Follow-up', description: 'Auto-schedule a visit if BP exceeds 140/90...', status: 'ACTIVE', modified: '2h ago' },
-  { id: '2', title: 'Lab Results Alert', description: 'Notify provider immediately if lab values are...', status: 'ACTIVE', modified: 'Oct 24' },
-  { id: '3', title: 'Holiday Auto-Reply', description: 'Send automated reply during holidays.', status: 'INACTIVE', modified: 'Sep 12' },
-  { id: '4', title: 'Diabetes Care Plan', description: 'Trigger reminders for HbA1c checks every 3 months.', status: 'ACTIVE', modified: 'Oct 15' },
-];
+function normalizeRule(item: unknown): RuleCard {
+  const r = item as Record<string, unknown>;
+  const id = r?.id != null ? String(r.id) : '';
+  const title = (r?.title as string) ?? (r?.name as string) ?? 'Untitled';
+  const description = (r?.description as string) ?? '';
+  const status = (r?.status as string) === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  const rawDate = (r?.updatedAt ?? r?.modifiedAt ?? r?.modified) as string | undefined;
+  const modified = rawDate
+    ? (() => {
+      try {
+        const d = new Date(rawDate);
+        if (Number.isNaN(d.getTime())) return rawDate;
+        const now = new Date();
+        const diffMs = now.getTime() - d.getTime();
+        if (diffMs < 60 * 60 * 1000) return `${Math.round(diffMs / 60000)}m ago`;
+        if (diffMs < 24 * 60 * 60 * 1000) return `${Math.round(diffMs / 3600000)}h ago`;
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      } catch {
+        return rawDate;
+      }
+    })()
+    : '—';
+  return { id, title, description, status, modified };
+}
 
 export default function DoctorRuleManagement() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All Status');
+  const [rules, setRules] = useState<RuleCard[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = MOCK_RULES.filter((r) => {
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let cancelled = false;
+    doctorsApi.me.getRules({ signal: ctrl.signal })
+      .then((res) => {
+        if (cancelled) return;
+        const raw = (res.data as unknown[]) ?? [];
+        setRules(Array.isArray(raw) ? raw.map(normalizeRule) : []);
+      })
+      .catch(() => { if (!cancelled) setRules([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, []);
+
+  const filtered = rules.filter((r) => {
     const matchSearch = !search || r.title.toLowerCase().includes(search.toLowerCase()) || r.description.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'All Status' || (statusFilter === 'Clinical' && r.status === 'ACTIVE') || (statusFilter === 'Admin' && r.status === 'INACTIVE');
     return matchSearch && matchStatus;
@@ -73,31 +111,37 @@ export default function DoctorRuleManagement() {
       </Link>
 
       <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">Active Rules ({activeCount})</h2>
-      <div className="space-y-4">
-        {filtered.map((rule) => (
-          <div key={rule.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <h3 className="font-semibold text-gray-900">{rule.title}</h3>
-              <span className={`shrink-0 px-2.5 py-0.5 rounded-full text-xs font-medium ${rule.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'}`}>
-                {rule.status}
-              </span>
+      {loading ? (
+        <div className="py-8 text-center text-gray-500">Loading rules...</div>
+      ) : filtered.length === 0 ? (
+        <div className="py-8 text-center text-gray-500">No rules found. Create one above.</div>
+      ) : (
+        <div className="space-y-4">
+          {filtered.map((rule) => (
+            <div key={rule.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <h3 className="font-semibold text-gray-900">{rule.title}</h3>
+                <span className={`shrink-0 px-2.5 py-0.5 rounded-full text-xs font-medium ${rule.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'}`}>
+                  {rule.status}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mb-3">{rule.description}</p>
+              <p className="text-xs text-gray-500 mb-3">Modified: {rule.modified}</p>
+              <div className="flex items-center gap-2">
+                <Link to={`/doctor/rules/${rule.id}`} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="View">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                </Link>
+                <Link to={`/doctor/rules/${rule.id}/edit`} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Edit">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </Link>
+                <button type="button" className="p-2 rounded-lg hover:bg-red-50 text-gray-600 hover:text-red-600" aria-label="Delete">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
             </div>
-            <p className="text-sm text-gray-600 mb-3">{rule.description}</p>
-            <p className="text-xs text-gray-500 mb-3">Modified: {rule.modified}</p>
-            <div className="flex items-center gap-2">
-              <Link to={`/doctor/rules/${rule.id}`} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="View">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-              </Link>
-              <Link to={`/doctor/rules/${rule.id}/edit`} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Edit">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-              </Link>
-              <button type="button" className="p-2 rounded-lg hover:bg-red-50 text-gray-600 hover:text-red-600" aria-label="Delete">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

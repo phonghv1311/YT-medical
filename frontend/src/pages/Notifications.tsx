@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { notificationsApi } from '../api/notifications';
 import type { Notification } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAppSelector } from '../hooks/useAppDispatch';
+import { getRole } from '../utils/auth';
 import { ListRowSkeleton } from '../components/skeletons';
 
 type TabFilter = 'all' | 'unread';
@@ -61,6 +63,8 @@ function getNotificationIcon(type: string, readAt?: string) {
 
 export default function Notifications() {
   const { t } = useLanguage();
+  const user = useAppSelector((s) => s.auth.user);
+  const isCustomer = getRole(user) === 'customer';
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabFilter>('all');
@@ -109,51 +113,42 @@ export default function Notifications() {
   const todayItems = filtered.filter((n) => isToday(n.createdAt));
   const earlierItems = filtered.filter((n) => !isToday(n.createdAt));
 
-  return (
-    <div className="min-h-screen bg-gray-50 pb-8">
-      {/* Header: title + ellipsis menu */}
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-900">{t('notifications.title')}</h1>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((o) => !o)}
-              className="p-2 rounded-full hover:bg-gray-100 text-gray-600"
-              aria-label="Options"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
-            </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" aria-hidden onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 w-48 rounded-lg bg-white border border-gray-200 shadow-lg py-1 z-20">
-                  <button type="button" onClick={markAllRead} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                    {t('notifications.markAllAsRead')}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+  const titleKey = isCustomer ? 'customerNotifications.title' : 'notifications.title';
+  const markAllReadKey = isCustomer ? 'customerNotifications.markAllRead' : 'notifications.markAllAsRead';
+  const sectionLatestKey = isCustomer ? 'customerNotifications.latest' : 'notifications.today';
+  const sectionPreviouslyKey = isCustomer ? 'customerNotifications.previously' : 'notifications.earlier';
 
-        {/* Tabs: All | Unread */}
-        <div className="flex gap-1 mt-3">
-          <button
-            type="button"
-            onClick={() => setTab('all')}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${tab === 'all' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-          >
-            {t('notifications.all')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('unread')}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${tab === 'unread' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-          >
-            {t('notifications.unread')}
-          </button>
+  return (
+    <div className="min-h-screen bg-white pb-24">
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-gray-900">{t(titleKey)}</h1>
+          {isCustomer ? (
+            <button type="button" onClick={markAllRead} className="text-sm font-medium text-blue-600 hover:underline py-2">
+              {t(markAllReadKey)}
+            </button>
+          ) : (
+            <div className="relative">
+              <button type="button" onClick={() => setMenuOpen((o) => !o)} className="p-2 rounded-full hover:bg-gray-100 text-gray-600" aria-label="Options">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" aria-hidden onClick={() => setMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-48 rounded-lg bg-white border border-gray-200 shadow-lg py-1 z-20">
+                    <button type="button" onClick={markAllRead} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">{t(markAllReadKey)}</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
+        {!isCustomer && (
+          <div className="flex gap-1 mt-3">
+            <button type="button" onClick={() => setTab('all')} className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${tab === 'all' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{t('notifications.all')}</button>
+            <button type="button" onClick={() => setTab('unread')} className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${tab === 'unread' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{t('notifications.unread')}</button>
+          </div>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -166,7 +161,7 @@ export default function Notifications() {
           {/* Today */}
           {todayItems.length > 0 && (
             <section className="mb-4">
-              <h2 className="text-sm font-bold text-gray-900 mb-2">{t('notifications.today')}</h2>
+              <h2 className="text-sm font-bold text-gray-900 mb-2">{t(sectionLatestKey)}</h2>
               <ul className="space-y-0 divide-y divide-gray-100 bg-white rounded-xl border border-gray-100 overflow-hidden">
                 {todayItems.map((n) => (
                   <li key={n.id}>
@@ -181,7 +176,7 @@ export default function Notifications() {
           {earlierItems.length > 0 && (
             <section className="mb-4">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-bold text-gray-900">{t('notifications.earlier')}</h2>
+                <h2 className="text-sm font-bold text-gray-900">{t(sectionPreviouslyKey)}</h2>
                 <span className="text-xs text-blue-600 font-medium">{t('notifications.seeAll')}</span>
               </div>
               <ul className="space-y-0 divide-y divide-gray-100 bg-white rounded-xl border border-gray-100 overflow-hidden">

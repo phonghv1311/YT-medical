@@ -9,3 +9,7 @@ export { notificationsApi } from './notifications';
 export { adminApi } from './admin';
 export { searchApi } from './search';
 export { feedbackApi } from './feedback';
+export { newsApi } from './news';
+export { productsApi } from './products';
+export { conversationsApi } from './conversations';
+export { reportsApi } from './reports';

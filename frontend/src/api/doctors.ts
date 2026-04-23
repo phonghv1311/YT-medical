@@ -43,6 +43,8 @@ const me = {
   },
   deleteCertificate: (id: number) => api.delete(`/doctors/me/certificates/${id}`),
   submitCertificatesForVerification: () => api.post('/doctors/me/certificates/submit'),
+  getRules: (config?: RequestConfig) => api.get<unknown[]>('/doctors/me/rules', config),
+  getRuleById: (id: string, config?: RequestConfig) => api.get<unknown>(`/doctors/me/rules/${id}`, config),
 };
 
 export const doctorsApi = {

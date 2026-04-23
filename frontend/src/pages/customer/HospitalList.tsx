@@ -26,7 +26,10 @@ export default function HospitalList() {
     adminApi
       .getHospitals({ signal: ctrl.signal })
       .then((r) => {
-        if (!cancelled.current) setHospitals((r.data?.data ?? r.data) ?? []);
+        if (cancelled.current) return;
+        const raw = (r.data as any)?.data ?? r.data;
+        const list = Array.isArray(raw) ? raw : (raw as any)?.hospitals ?? (raw as any)?.rows ?? [];
+        setHospitals(Array.isArray(list) ? list : []);
       })
       .catch(() => { if (!cancelled.current) setHospitals([]); })
       .finally(() => { if (!cancelled.current) setLoading(false); });

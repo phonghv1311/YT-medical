@@ -25,11 +25,26 @@ export default function DoctorConsultationCall() {
       setLoading(false);
       return;
     }
+    const ctrl = new AbortController();
+    const cancelled = { current: false };
     appointmentsApi
-      .getById(numId)
-      .then(({ data }) => setAppointment(data?.data ?? data))
-      .catch(() => setAppointment(null))
-      .finally(() => setLoading(false));
+      .getById(numId, { signal: ctrl.signal })
+      .then(({ data }) => {
+        if (cancelled.current) return;
+        setAppointment(data?.data ?? data);
+      })
+      .catch((err) => {
+        if (!cancelled.current && err?.code !== 'ERR_CANCELED' && err?.name !== 'AbortError') {
+          setAppointment(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled.current) setLoading(false);
+      });
+    return () => {
+      cancelled.current = true;
+      ctrl.abort();
+    };
   }, [id]);
 
   useEffect(() => {

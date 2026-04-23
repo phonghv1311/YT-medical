@@ -7,6 +7,7 @@ import {
   BelongsTo,
 } from 'sequelize-typescript';
 import { Hospital } from './hospital.model.js';
+import { User } from './user.model.js';
 
 @Table({ tableName: 'departments', timestamps: true })
 export class Department extends Model {
@@ -36,6 +37,13 @@ export class Department extends Model {
   })
   declare description: string | null;
 
+  @ForeignKey(() => User)
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: true,
+  })
+  declare headId: number | null;
+
   @Column({
     type: DataType.BOOLEAN,
     defaultValue: true,
@@ -45,6 +53,9 @@ export class Department extends Model {
 
   @BelongsTo(() => Hospital)
   declare hospital?: Hospital;
+
+  @BelongsTo(() => User, { foreignKey: 'headId', as: 'head' })
+  declare head?: User;
 }
 
 export default Department;

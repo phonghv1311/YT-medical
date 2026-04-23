@@ -90,6 +90,36 @@ const authSlice = createSlice({
     clearError(state) {
       state.error = null;
     },
+    /** Clears auth state without calling API; used when login succeeds but 2FA verification is pending (e.g. admin/superadmin). */
+    clearAuthForOtp(state) {
+      state.user = null;
+      state.accessToken = null;
+      state.refreshToken = null;
+      state.error = null;
+      localStorage.removeItem('user');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      if (typeof localStorage.getItem(TOKEN_EXPIRES_AT_KEY) === 'string') {
+        localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
+      }
+    },
+    /** Sets auth state from payload (e.g. after 2FA verification). */
+    setAuth(state, action: PayloadAction<{ user: User; accessToken: string; refreshToken: string }>) {
+      const { user, accessToken, refreshToken } = action.payload;
+      state.loading = false;
+      state.user = user;
+      state.accessToken = accessToken;
+      state.refreshToken = refreshToken;
+      state.error = null;
+      (state as { profileFetched?: boolean }).profileFetched = true;
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('accessToken', accessToken);
+      localStorage.setItem('refreshToken', refreshToken);
+      const expiresAt = getJwtExpiryMs(accessToken);
+      if (expiresAt != null) {
+        localStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(expiresAt));
+      }
+    },
   },
   extraReducers: (builder) => {
     const handleAuth = (state: AuthState & { profileFetched?: boolean }, action: PayloadAction<{ user: User; accessToken: string; refreshToken: string }>) => {
@@ -136,5 +166,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { logout, setTokens, clearError } = authSlice.actions;
+export const { logout, setTokens, clearError, clearAuthForOtp, setAuth } = authSlice.actions;
 export default authSlice.reducer;

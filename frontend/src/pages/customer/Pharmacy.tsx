@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { productsApi } from '../../api/products';
 import { ProductCardSkeleton } from '../../components/skeletons';
 
 const CATEGORIES = [
@@ -10,12 +11,19 @@ const CATEGORIES = [
   { id: 'personal', labelKey: 'pharmacy.personalCare' as const, icon: 'face' },
 ];
 
-const MOCK_PRODUCTS = [
-  { id: 1, name: 'Multivitamin Complex A-Z', size: '60 Capsules', price: 18.5, fav: false, inCart: 0 },
-  { id: 2, name: 'Hydrating Body Lotion', size: '200 ml', price: 12, fav: true, inCart: 0 },
-  { id: 3, name: 'First Aid Antiseptic', size: '100 ml', price: 8.75, fav: false, inCart: 0 },
-  { id: 4, name: 'Daily Nasal Spray', size: '20 ml', price: 15.9, fav: false, inCart: 2 },
-];
+type ProductItem = { id: number; name: string; size: string; price: number; fav: boolean; inCart: number };
+
+function normalizeProducts(raw: unknown): ProductItem[] {
+  const arr = Array.isArray(raw) ? raw : (raw as { data?: unknown[] })?.data ?? [];
+  return arr.map((item: Record<string, unknown>, i: number) => ({
+    id: Number(item.id ?? i + 1),
+    name: String(item.name ?? item.title ?? ''),
+    size: String(item.size ?? item.quantity ?? ''),
+    price: Number(item.price ?? 0),
+    fav: Boolean(item.fav ?? item.favorite),
+    inCart: Number(item.inCart ?? 0),
+  }));
+}
 
 function CategoryIcon({ icon }: { icon: string }) {
   const cls = 'w-6 h-6 text-sky-600';
@@ -51,16 +59,22 @@ export default function Pharmacy() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const [loading, setLoading] = useState(true);
-  const [cartCount, setCartCount] = useState(2);
-  const [products, setProducts] = useState<typeof MOCK_PRODUCTS>([]);
+  const [cartCount, setCartCount] = useState(0);
+  const [products, setProducts] = useState<ProductItem[]>([]);
   const [addingId, setAddingId] = useState<number | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setProducts(MOCK_PRODUCTS);
-      setLoading(false);
-    }, 400);
-    return () => clearTimeout(t);
+    const ctrl = new AbortController();
+    productsApi
+      .getList({ signal: ctrl.signal })
+      .then((res) => {
+        const raw = res.data?.data ?? res.data ?? [];
+        setProducts(normalizeProducts(raw));
+        setCartCount(normalizeProducts(raw).reduce((sum, p) => sum + p.inCart, 0));
+      })
+      .catch(() => setProducts([]))
+      .finally(() => setLoading(false));
+    return () => ctrl.abort();
   }, []);
 
   const toggleFav = (id: number) => {

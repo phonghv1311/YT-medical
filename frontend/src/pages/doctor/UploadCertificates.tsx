@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doctorsApi, type DoctorCertificateItem, type DoctorCertificateType } from '../../api/doctors';
 import { useToast } from '../../contexts/ToastContext';
@@ -51,26 +51,32 @@ export default function UploadCertificates() {
   const fileInputRefs = useRef<Record<DoctorCertificateType, HTMLInputElement | null>>({} as Record<DoctorCertificateType, HTMLInputElement | null>);
   const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '').replace(/\/$/, '');
 
-  const fetchCertificates = () => {
+  const fetchCertificates = useCallback((signal?: AbortSignal) => {
     setLoading(true);
-    doctorsApi.me.getCertificates()
+    doctorsApi.me.getCertificates({ signal })
       .then((res) => {
         const list = res.data?.certificates ?? res.data?.data?.certificates ?? [];
         setCertificates(Array.isArray(list) ? list : []);
       })
-      .catch(() => setCertificates([]))
+      .catch((err) => {
+        if (err.name !== 'CanceledError' && err.name !== 'AbortError') {
+          setCertificates([]);
+        }
+      })
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
-    fetchCertificates();
-  }, []);
+    const ctrl = new AbortController();
+    fetchCertificates(ctrl.signal);
+    return () => ctrl.abort();
+  }, [fetchCertificates]);
 
   const byType = (type: DoctorCertificateType) => certificates.find((c) => c.type === type) ?? null;
   const completedCount = REQUIRED_TYPES.filter(({ type }) => hasFile(byType(type))).length;
   const allHaveFile = completedCount === 4;
 
-  const handleFileSelect = (type: DoctorCertificateType, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((type: DoctorCertificateType, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -92,13 +98,13 @@ export default function UploadCertificates() {
       })
       .catch(() => toast.error('Upload failed. Please try again.'))
       .finally(() => { setUploadingType(null); setUploadProgress(0); });
-  };
+  }, [fetchCertificates, toast]);
 
-  const handleDelete = (id: number) => {
+  const handleDelete = useCallback((id: number) => {
     doctorsApi.me.deleteCertificate(id)
       .then(() => { fetchCertificates(); toast.success('Document removed.'); })
       .catch(() => toast.error('Failed to remove document.'));
-  };
+  }, [fetchCertificates, toast]);
 
   const handleView = (cert: DoctorCertificateItem) => {
     if (!cert.fileUrl) return;

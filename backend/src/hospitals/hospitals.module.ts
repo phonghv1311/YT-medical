@@ -9,10 +9,12 @@ import { Doctor } from '../database/models/doctor.model.js';
 import { DoctorDepartment } from '../database/models/doctor-department.model.js';
 import { Staff } from '../database/models/staff.model.js';
 import { Appointment } from '../database/models/appointment.model.js';
+import { LogsModule } from '../logs/logs.module.js';
 
 @Module({
   imports: [
     SequelizeModule.forFeature([Hospital, Department, User, Doctor, DoctorDepartment, Staff, Appointment]),
+    LogsModule,
   ],
   controllers: [HospitalsController],
   providers: [HospitalsService],

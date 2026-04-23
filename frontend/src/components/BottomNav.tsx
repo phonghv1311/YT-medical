@@ -8,43 +8,41 @@ type NavItem = { path: string; labelKey: string; icon: NavIconKey; fab?: boolean
 
 const customerNavItems: NavItem[] = [
   { path: '/customer', labelKey: 'nav.home', icon: 'home' },
-  { path: '/customer/doctors', labelKey: 'nav.doctors', icon: 'doctors' },
-  { path: '/customer/family', labelKey: 'nav.family', icon: 'family' },
-  { path: '/customer/records', labelKey: 'nav.records', icon: 'records' },
-  { path: '/customer/pharmacy', labelKey: 'nav.pharmacy', icon: 'pharmacy' },
-  { path: '/profile', labelKey: 'nav.profile', icon: 'profile' },
-];
-
-const doctorNavItems: NavItem[] = [
-  { path: '/doctor', labelKey: 'nav.dashboard', icon: 'home' },
-  { path: '/doctor/patients', labelKey: 'nav.patients', icon: 'doctors' },
-  { path: '/doctor/prescriptions/new', labelKey: 'nav.newPrescription', icon: 'consult', fab: true },
-  { path: '/doctor/schedule', labelKey: 'nav.schedule', icon: 'schedule' },
+  { path: '/customer/doctors', labelKey: 'nav.findDoctors', icon: 'doctors' },
+  { path: '/customer/appointments', labelKey: 'nav.appointments', icon: 'schedule' },
+  { path: '/customer/messages', labelKey: 'nav.messages', icon: 'messages' },
   { path: '/profile', labelKey: 'nav.settings', icon: 'profile' },
 ];
 
+const doctorNavItems: NavItem[] = [
+  { path: '/doctor', labelKey: 'nav.homePage', icon: 'home' },
+  { path: '/doctor/appointments', labelKey: 'nav.appointments', icon: 'schedule' },
+  { path: '/doctor/patients', labelKey: 'nav.patients', icon: 'doctors' },
+  { path: '/doctor/messages', labelKey: 'nav.messages', icon: 'messages' },
+  { path: '/profile', labelKey: 'nav.personal', icon: 'profile' },
+];
+
 const superadminNavItems: NavItem[] = [
-  { path: '/admin', labelKey: 'nav.dashboard', icon: 'home' },
+  { path: '/admin', labelKey: 'nav.homePage', icon: 'home' },
   { path: '/admin/users', labelKey: 'nav.users', icon: 'doctors' },
   { path: '/admin/hospitals', labelKey: 'nav.hospitals', icon: 'facilities' },
-  { path: '/admin/news', labelKey: 'nav.news', icon: 'articles' },
+  { path: '/admin/roles', labelKey: 'nav.roles', icon: 'roles' },
   { path: '/admin/reports', labelKey: 'nav.reports', icon: 'reports' },
   { path: '/profile', labelKey: 'nav.settings', icon: 'profile' },
 ];
 
 const adminNavItems: NavItem[] = [
-  { path: '/admin', labelKey: 'nav.dashboard', icon: 'home' },
+  { path: '/admin', labelKey: 'nav.homePage', icon: 'home' },
   { path: '/admin/users', labelKey: 'nav.users', icon: 'doctors' },
   { path: '/admin/hospitals', labelKey: 'nav.hospitals', icon: 'facilities' },
-  { path: '/admin/news', labelKey: 'nav.news', icon: 'articles' },
+  { path: '/admin/roles', labelKey: 'nav.roles', icon: 'roles' },
   { path: '/admin/reports', labelKey: 'nav.reports', icon: 'reports' },
   { path: '/profile', labelKey: 'nav.settings', icon: 'profile' },
 ];
 
 const staffNavItems: NavItem[] = [
-  { path: '/admin', labelKey: 'nav.dashboard', icon: 'home' },
-  { path: '/admin/users', labelKey: 'nav.users', icon: 'doctors' },
-  { path: '/admin/reports', labelKey: 'nav.reports', icon: 'reports' },
+  { path: '/admin', labelKey: 'nav.homePage', icon: 'home' },
+  { path: '/admin/schedule', labelKey: 'nav.schedule', icon: 'schedule' },
   { path: '/profile', labelKey: 'nav.settings', icon: 'profile' },
 ];
 

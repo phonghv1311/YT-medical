@@ -24,10 +24,12 @@ export default function ConsultationCall() {
       setLoading(false);
       return;
     }
-    appointmentsApi.getById(numId)
+    const ctrl = new AbortController();
+    appointmentsApi.getById(numId, { signal: ctrl.signal })
       .then(({ data }) => setAppointment(data?.data ?? data))
-      .catch(() => setAppointment(null))
+      .catch((err) => { if (err?.code !== 'ERR_CANCELED') setAppointment(null); })
       .finally(() => setLoading(false));
+    return () => ctrl.abort();
   }, [id]);
 
   useEffect(() => {

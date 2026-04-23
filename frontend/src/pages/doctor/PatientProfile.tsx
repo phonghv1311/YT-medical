@@ -1,32 +1,49 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { doctorsApi } from '../../api/doctors';
 import type { User } from '../../types';
 import { ProfileSkeleton } from '../../components/skeletons';
 
-type TabId = 'history' | 'labs' | 'prescriptions' | 'appointments';
+type TabId = 'record' | 'prescriptions' | 'history';
 
 interface ActivityItem {
   id: string;
-  type: 'consultation' | 'lab' | 'urgent';
+  type: 'reExamination' | 'general' | 'emergency';
   date: string;
   title: string;
   description: string;
-  tags?: string[];
-  link?: string;
+  doctor?: string;
 }
 
-const MOCK_ACTIVITY: ActivityItem[] = [
-  { id: '1', type: 'consultation', date: 'Oct 12, 2023', title: 'Telehealth Consultation', description: 'Follow-up on hypertension. Patient reports consistent blood pressure readings within range. Renewed Lisinopril prescription for 3 months.', tags: ['HYPERTENSION', 'FOLLOW-UP'] },
-  { id: '2', type: 'lab', date: 'Sep 28, 2023', title: 'Laboratory Work', description: 'Complete blood count (CBC) and lipid panel. Results indicate slightly elevated LDL cholesterol. Recommended dietary adjustments.', link: 'View lab results' },
-  { id: '3', type: 'urgent', date: 'Aug 15, 2023', title: 'Urgent Care Visit', description: 'Persistent dry cough and mild fever. Diagnosed with seasonal viral infection. OTC medication prescribed for symptom management.' },
-];
+function appointmentToActivity(a: { id: number; scheduledAt?: string; reason?: string; notes?: string; status?: string }): ActivityItem {
+  const dateStr = a.scheduledAt
+    ? (() => {
+      try {
+        const d = new Date(a.scheduledAt);
+        return Number.isNaN(d.getTime()) ? a.scheduledAt : d.toLocaleDateString('vi-VN', { day: 'numeric', month: 'short', year: 'numeric' });
+      } catch {
+        return a.scheduledAt;
+      }
+    })()
+    : '—';
+  return {
+    id: String(a.id),
+    type: (a.reason?.toLowerCase().includes('tái khám') || a.reason?.toLowerCase().includes('re-examination')) ? 'reExamination' : (a.status === 'emergency' ? 'emergency' : 'general'),
+    date: dateStr,
+    title: (a.reason as string) ?? 'Appointment',
+    description: (a.notes as string) ?? '',
+    doctor: undefined,
+  };
+}
 
 export default function DoctorPatientProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [patient, setPatient] = useState<(User & { lastVisit?: string; patientId?: string; gender?: string; age?: number }) | null>(null);
-  const [tab, setTab] = useState<TabId>('appointments');
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [tab, setTab] = useState<TabId>('record');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -36,14 +53,26 @@ export default function DoctorPatientProfile() {
     }
     const ctrl = new AbortController();
     const cancelled = { current: false };
-    doctorsApi.me.getPatients({ signal: ctrl.signal })
-      .then(({ data }) => {
+    Promise.all([
+      doctorsApi.me.getPatients({ signal: ctrl.signal }),
+      doctorsApi.me.getAppointments({ signal: ctrl.signal }),
+    ])
+      .then(([patientsRes, apptsRes]) => {
         if (cancelled.current) return;
-        const list = (data?.data ?? data) as User[];
+        const list = (patientsRes.data?.data ?? patientsRes.data) as User[];
         const found = Array.isArray(list) ? list.find((p) => String(p.id) === id) : null;
         setPatient(found ?? null);
+        const appts = (apptsRes.data?.data ?? apptsRes.data) as unknown[];
+        const arr = Array.isArray(appts) ? appts : [];
+        const forPatient = arr.filter((a: { patientId?: number; patient?: { id?: number } }) => String((a as { patientId?: number }).patientId ?? (a as { patient?: { id?: number } }).patient?.id) === id);
+        setActivities(forPatient.map((a: unknown) => appointmentToActivity(a as Parameters<typeof appointmentToActivity>[0])));
       })
-      .catch(() => { if (!cancelled.current) setPatient(null); })
+      .catch(() => {
+        if (!cancelled.current) {
+          setPatient(null);
+          setActivities([]);
+        }
+      })
       .finally(() => { if (!cancelled.current) setLoading(false); });
     return () => {
       cancelled.current = true;
@@ -63,120 +92,102 @@ export default function DoctorPatientProfile() {
   }
 
   const name = `${patient.firstName ?? ''} ${patient.lastName ?? ''}`.trim() || `Patient #${patient.id}`;
-  const demographics = `Female, 32 years • ID: ${(patient as { patientId?: string }).patientId ?? `#PT-${String(patient.id).padStart(4, '0')}`}`;
+  const age = (patient as { age?: number }).age ?? 35;
+  const gender = (patient as { gender?: string }).gender ?? 'Nam';
+  const phone = (patient as { phone?: string }).phone ?? '+84 912 345 678';
+  const address = (patient as { address?: string }).address ?? '123 Đường Lê Lợi, Quận 1, TP. Hồ Chí Minh';
   const tabs: { id: TabId; label: string }[] = [
-    { id: 'history', label: 'History' },
-    { id: 'labs', label: 'Labs' },
-    { id: 'prescriptions', label: 'Prescriptions' },
-    { id: 'appointments', label: 'Appointments' },
+    { id: 'record', label: t('doctorPatientProfile.medicalRecord') },
+    { id: 'prescriptions', label: t('doctorPatientProfile.prescriptions') },
+    { id: 'history', label: t('doctorPatientProfile.history') },
   ];
 
+  const badgeClass = (type: ActivityItem['type']) =>
+    type === 'reExamination' ? 'bg-blue-100 text-blue-800' : type === 'general' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+  const badgeLabel = (type: ActivityItem['type']) =>
+    type === 'reExamination' ? t('doctorPatientProfile.reExamination') : type === 'general' ? t('doctorPatientProfile.general') : t('doctorPatientProfile.emergency');
+
   return (
-    <div className="min-h-full w-full max-w-4xl mx-auto pb-28 px-0">
-      <div className="flex items-center gap-3 mb-6">
-        <button type="button" onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-lg hover:bg-gray-100" aria-label="Back">
-          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+    <div className="min-h-full w-full max-w-lg mx-auto pb-28 px-4">
+      <div className="flex items-center gap-3 py-3">
+        <button type="button" onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label={t('common.back')}>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
-        <h1 className="text-xl font-bold text-gray-900 flex-1">Patient Profile</h1>
-        <button type="button" className="p-2 rounded-lg hover:bg-gray-100" aria-label="More options">
-          <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
-        </button>
+        <h1 className="text-lg font-bold text-gray-900 flex-1 truncate">{name}</h1>
+        <Link to={`/doctor/messages/${id}`} className="p-2 rounded-lg hover:bg-gray-100 text-blue-600" aria-label={t('nav.messages')}>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+        </Link>
+        <Link to={`/doctor/appointments?patientId=${id}`} className="p-2 rounded-lg hover:bg-gray-100 text-blue-600" aria-label="Video call">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+        </Link>
       </div>
 
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-6 mb-6">
-        <div className="flex flex-wrap gap-4 items-start">
-          <div className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-2xl shrink-0">
+      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4 mb-4">
+        <div className="flex gap-4">
+          <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-xl shrink-0">
             {(patient.firstName?.[0] ?? '') + (patient.lastName?.[0] ?? '') || '?'}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-bold text-gray-900">{name}</h2>
-            <p className="text-sm text-gray-600 mt-1">{demographics}</p>
-            <span className="inline-block mt-2 px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active Patient</span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-              <div className="rounded-xl bg-gray-50 p-3 flex items-center gap-2">
-                <span className="text-red-500">
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3z" clipRule="evenodd" /></svg>
-                </span>
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Blood Type</p>
-                  <p className="text-sm font-medium text-gray-900">O Positive (O+)</p>
-                </div>
-              </div>
-              <div className="rounded-xl bg-gray-50 p-3 flex items-center gap-2">
-                <span className="text-amber-500">
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                </span>
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Allergies</p>
-                  <p className="text-sm font-medium text-gray-900">Penicillin, Latex</p>
-                </div>
-              </div>
-            </div>
+            <h2 className="text-lg font-bold text-gray-900">{name}</h2>
+            <p className="text-sm text-gray-600 mt-0.5">{age} tuổi • {gender}</p>
+            <p className="text-sm text-blue-600 mt-1 flex items-center gap-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+              {phone}
+            </p>
+            <p className="text-sm text-gray-500 mt-0.5 flex items-center gap-1">
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              {address}
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="flex gap-6 overflow-x-auto -mb-px">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`py-3 text-sm font-medium whitespace-nowrap border-b-2 transition ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+      <div className="flex border-b border-gray-200 mb-4">
+        {tabs.map((tb) => (
+          <button
+            key={tb.id}
+            type="button"
+            onClick={() => setTab(tb.id)}
+            className={`py-3 px-2 text-sm font-medium border-b-2 transition ${tab === tb.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            {tb.label}
+          </button>
+        ))}
       </div>
 
       <div>
-        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Recent Activity</h3>
-        <div className="relative space-y-0">
-          {MOCK_ACTIVITY.map((item, idx) => (
-            <div key={item.id} className="flex gap-4 relative pb-6">
-              {idx < MOCK_ACTIVITY.length - 1 && <div className="absolute left-5 top-10 bottom-0 w-px bg-gray-200" />}
-              <div className="shrink-0 w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center z-[1] text-gray-600">
-                {item.type === 'consultation' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>}
-                {item.type === 'lab' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>}
-                {item.type === 'urgent' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>}
-              </div>
-              <div className="flex-1 min-w-0 rounded-xl bg-white border border-gray-100 p-4 shadow-sm">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <p className="font-semibold text-gray-900">{item.title}</p>
+        <h3 className="text-xs font-bold text-gray-500 uppercase mb-3">{t('doctorPatientProfile.recent')}</h3>
+        <div className="space-y-3">
+          {activities.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4">{t('doctorPatientProfile.noRecentActivity') ?? 'No recent activity.'}</p>
+          ) : (
+            activities.map((item) => (
+              <div key={item.id} className="rounded-xl bg-white border border-gray-100 p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${badgeClass(item.type)}`}>{badgeLabel(item.type)}</span>
                   <span className="text-xs text-gray-500">{item.date}</span>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">{item.description}</p>
-                {item.tags && item.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {item.tags.map((tag) => (
-                      <span key={tag} className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">{tag}</span>
-                    ))}
-                  </div>
+                <p className="font-semibold text-gray-900">{item.title}</p>
+                <p className="text-sm text-gray-600 mt-0.5">{item.description}</p>
+                {item.doctor && (
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+                    {item.doctor}
+                  </p>
                 )}
-                {item.link && <button type="button" className="mt-2 text-sm font-medium text-blue-600 hover:underline flex items-center gap-1">{item.link} <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>}
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 
-      <div className="fixed left-0 right-0 bottom-16 max-w-lg mx-auto px-4 z-30 flex gap-2 safe-area-pb">
-        <Link
-          to={`/doctor/patients/${patient.id}/prescription/new`}
-          className="flex-1 py-4 rounded-xl border-2 border-blue-600 text-blue-600 text-center font-semibold hover:bg-blue-50 flex items-center justify-center gap-2"
-        >
-          New Prescription
-        </Link>
-        <Link
-          to={`/doctor/appointments?patientId=${patient.id}`}
-          className="flex-1 py-4 rounded-xl bg-blue-600 text-white text-center font-semibold shadow-lg hover:bg-blue-700 flex items-center justify-center gap-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-          Start Consultation
-        </Link>
-      </div>
+      <Link
+        to={`/doctor/appointments?patientId=${patient.id}`}
+        className="fixed left-4 right-4 bottom-20 max-w-lg mx-auto py-4 rounded-xl bg-blue-600 text-white text-center font-semibold shadow-lg hover:bg-blue-700 flex items-center justify-center gap-2 z-30"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+        {t('doctorPatientProfile.startExam')}
+      </Link>
     </div>
   );
 }

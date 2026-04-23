@@ -11,6 +11,8 @@ import { Staff } from '../database/models/staff.model.js';
 import { Appointment } from '../database/models/appointment.model.js';
 import { CreateHospitalDto } from './dto/create-hospital.dto.js';
 import { UpdateHospitalDto } from './dto/update-hospital.dto.js';
+import { DeactivateHospitalDto } from './dto/deactivate-hospital.dto.js';
+import { LogsService } from '../logs/logs.service.js';
 
 @Injectable()
 export class HospitalsService {
@@ -22,11 +24,16 @@ export class HospitalsService {
     @InjectModel(DoctorDepartment) private readonly doctorDepartmentModel: typeof DoctorDepartment,
     @InjectModel(Staff) private readonly staffModel: typeof Staff,
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
+    private readonly logsService: LogsService,
   ) { }
 
   async findAll() {
+    // Return all hospitals (active + paused) with basic stats for list UI.
+    // Note: use SQL subqueries to avoid heavy joins.
     return this.hospitalModel.findAll({
-      where: { isActive: true },
+      include: [
+        { model: User, as: 'head', attributes: ['id', 'firstName', 'lastName', 'email'], required: false },
+      ],
       attributes: {
         include: [
           [
@@ -34,6 +41,24 @@ export class HospitalsService {
               '(SELECT COUNT(*) FROM `departments` WHERE `departments`.`hospitalId` = `Hospital`.`id` AND `departments`.`isActive` = true)',
             ),
             'departmentCount',
+          ],
+          [
+            Sequelize.literal(
+              '(SELECT COUNT(*) FROM `staff` WHERE `staff`.`hospitalId` = `Hospital`.`id`)',
+            ),
+            'staffCount',
+          ],
+          [
+            Sequelize.literal(
+              '(SELECT COUNT(DISTINCT `dd`.`doctorId`) FROM `doctor_departments` AS `dd` JOIN `departments` AS `dep` ON `dep`.`id` = `dd`.`departmentId` WHERE `dep`.`hospitalId` = `Hospital`.`id` AND `dep`.`isActive` = true)',
+            ),
+            'doctorCount',
+          ],
+          [
+            Sequelize.literal(
+              '(SELECT COUNT(DISTINCT `a`.`patientId`) FROM `appointments` AS `a` WHERE `a`.`doctorId` IN (SELECT DISTINCT `dd2`.`doctorId` FROM `doctor_departments` AS `dd2` JOIN `departments` AS `dep2` ON `dep2`.`id` = `dd2`.`departmentId` WHERE `dep2`.`hospitalId` = `Hospital`.`id` AND `dep2`.`isActive` = true))',
+            ),
+            'patientCount',
           ],
         ],
       },
@@ -67,7 +92,10 @@ export class HospitalsService {
       if (uniqueDoctorIds.length > 0) {
         doctors = await this.doctorModel.findAll({
           where: { id: { [Op.in]: uniqueDoctorIds } },
-          include: [{ model: User, attributes: ['id', 'firstName', 'lastName', 'email', 'avatar'] }],
+          include: [
+            { model: User, attributes: ['id', 'firstName', 'lastName', 'email', 'avatar'] },
+            { model: DoctorDepartment, as: 'doctorDepartments', attributes: ['departmentId'], required: false },
+          ],
         });
       }
     }
@@ -113,12 +141,18 @@ export class HospitalsService {
     return hospital;
   }
 
-  async update(id: number, dto: UpdateHospitalDto) {
+  async update(id: number, dto: UpdateHospitalDto, performedByUserId?: number) {
     const hospital = await this.hospitalModel.findByPk(id);
     if (!hospital) throw new NotFoundException('Hospital not found');
 
-    const { departmentNames, doctorIds, ...rest } = dto;
+    const { departmentNames, doctorIds, reason, ...rest } = dto;
     await hospital.update(rest as Partial<Hospital>);
+
+    if (dto.isActive !== undefined && performedByUserId != null) {
+      const action = dto.isActive ? 'activate' : 'deactivate';
+      const reasonText = reason ?? '';
+      await this.logsService.log(performedByUserId, action, 'hospital', id, JSON.stringify({ reason: reasonText }), undefined, reasonText);
+    }
 
     if (departmentNames !== undefined) {
       await this.departmentModel.update({ isActive: false }, { where: { hospitalId: id } });
@@ -151,10 +185,21 @@ export class HospitalsService {
     return this.hospitalModel.findByPk(id, { include: [{ model: Department, required: false }] });
   }
 
-  async remove(id: number) {
+  async remove(id: number, dto: DeactivateHospitalDto, performedByUserId: number) {
     const hospital = await this.hospitalModel.findByPk(id);
     if (!hospital) throw new NotFoundException('Hospital not found');
     await hospital.update({ isActive: false });
+
+    await this.logsService.log(
+      performedByUserId,
+      'deactivate',
+      'hospital',
+      id,
+      JSON.stringify({ reason: dto.reason }),
+      undefined,
+      dto.reason,
+    );
+
     return { message: 'Hospital deactivated' };
   }
 }

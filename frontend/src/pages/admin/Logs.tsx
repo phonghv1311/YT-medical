@@ -4,11 +4,13 @@ import { TableSkeleton } from '../../components/skeletons';
 
 interface LogEntry {
   id: number;
-  userId: number;
+  userId?: number | null;
   user?: { firstName: string; lastName: string; email: string };
   action: string;
   resource: string;
-  details?: string;
+  resourceId?: number | null;
+  details?: string | null;
+  reason?: string | null;
   createdAt: string;
 }
 
@@ -37,16 +39,12 @@ export default function AdminLogs() {
       if (signal?.aborted) return;
       const payload = data?.data ?? data;
 
-      if (Array.isArray(payload)) {
-        let filtered = payload as LogEntry[];
-        if (filterDateFrom) filtered = filtered.filter((l) => l.createdAt >= filterDateFrom);
-        if (filterDateTo) filtered = filtered.filter((l) => l.createdAt <= filterDateTo + 'T23:59:59');
-        setLogs(filtered);
-        setTotal(filtered.length);
-      } else {
-        setLogs(payload?.data ?? []);
-        setTotal(payload?.total ?? 0);
-      }
+      const rawLogs = (Array.isArray(payload) ? payload : (payload?.logs ?? payload?.data ?? [])) as LogEntry[];
+      let filtered = rawLogs;
+      if (filterDateFrom) filtered = filtered.filter((l) => l.createdAt >= filterDateFrom);
+      if (filterDateTo) filtered = filtered.filter((l) => l.createdAt <= filterDateTo + 'T23:59:59');
+      setLogs(filtered);
+      setTotal(Array.isArray(payload) ? filtered.length : (payload?.total ?? filtered.length));
     } catch (err) {
       if (!signal?.aborted) console.error('Failed to load logs', err);
     } finally {
@@ -118,29 +116,41 @@ export default function AdminLogs() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resource</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Thời gian</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ai thực hiện</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hành động</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Đối tượng</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Lý do</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {logs.map((log, i) => (
-                <tr key={log.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                    {new Date(log.createdAt).toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {log.user ? `${log.user.firstName} ${log.user.lastName}` : `User #${log.userId}`}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{log.action}</span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{log.resource}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">{log.details ?? '—'}</td>
-                </tr>
-              ))}
+              {logs.map((log, i) => {
+                const reasonText = (log.reason && String(log.reason).trim()) || (() => {
+                  if (!log.details) return log.action || '—';
+                  try {
+                    const o = JSON.parse(log.details) as { reason?: string };
+                    return (o?.reason != null ? String(o.reason).trim() : '') || log.action || '—';
+                  } catch {
+                    return log.details;
+                  }
+                })();
+                const targetLabel = log.resourceId != null ? `${log.resource} #${log.resourceId}` : log.resource || '—';
+                return (
+                  <tr key={log.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {new Date(log.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {log.user ? `${log.user.firstName ?? ''} ${log.user.lastName ?? ''}`.trim() || log.user.email : log.userId != null ? `User #${log.userId}` : '—'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{log.action}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{targetLabel}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">{reasonText}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

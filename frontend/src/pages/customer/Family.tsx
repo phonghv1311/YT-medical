@@ -18,10 +18,12 @@ export default function Family() {
 
   useEffect(() => {
     if (!user) return;
-    patientsApi.getFamilyMembersMe()
+    const ctrl = new AbortController();
+    patientsApi.getFamilyMembersMe({ signal: ctrl.signal })
       .then((r) => setMembers(r.data?.data ?? r.data ?? []))
-      .catch(() => setMembers([]))
+      .catch((err) => { if (err?.code !== 'ERR_CANCELED') setMembers([]); })
       .finally(() => setLoading(false));
+    return () => ctrl.abort();
   }, [user]);
 
   const handleAdd = async (e: React.FormEvent) => {

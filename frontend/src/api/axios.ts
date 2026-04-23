@@ -3,8 +3,17 @@ import { store } from '../store';
 import { logout, setTokens } from '../store/authSlice';
 import { showGlobalError } from '../utils/toastBridge';
 
+// API base: backend uses setGlobalPrefix('api'), so requests must end at /api/...
+// If VITE_API_URL is set (e.g. https://example.com), use it and ensure /api path.
+function getApiBaseURL(): string {
+  const env = import.meta.env.VITE_API_URL;
+  if (!env || env === '') return '/api';
+  const base = env.replace(/\/+$/, '');
+  return base.endsWith('/api') ? base : `${base}/api`;
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: getApiBaseURL(),
   headers: { 'Content-Type': 'application/json' },
 });
 

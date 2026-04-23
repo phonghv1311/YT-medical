@@ -21,7 +21,8 @@
     "seed": "ts-node src/database/seeders/seed.ts",
     "seed:full": "npm run build && node dist/database/seeders/seed-full.js",
     "mongo:migrate": "ts-node src/database/mongo/migrate.ts",
-    "mongo:seed": "ts-node src/database/mongo/seed.ts"
+    "mongo:seed": "ts-node src/database/mongo/seed.ts",
+    "news:scan-scheduled": "ts-node src/news/scan-scheduled.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1001.0",
@@ -45,6 +46,8 @@
     "mongoose": "^9.2.4",
     "multer": "^2.1.0",
     "mysql2": "^3.18.2",
+    "pg": "^8.13.1",
+    "pg-hstore": "^2.3.4",
     "nodemailer": "^8.0.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

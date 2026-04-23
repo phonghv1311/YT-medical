@@ -1,26 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppSelector } from '../../hooks/useAppDispatch';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { doctorsApi } from '../../api/doctors';
 import { appointmentsApi } from '../../api/appointments';
-import { HEALTH_NEWS_ITEMS, type HealthNewsItem } from '../../data/healthNews';
 import type { Appointment } from '../../types';
 import { DashboardSkeleton } from '../../components/skeletons';
-
-const NOTIFICATIONS_MOCK = [
-  { id: 1, type: 'emergency', title: 'Emergency Alert', body: 'Patient Mark Robinson reported severe chest pain.', time: 'Just now', urgent: true },
-  { id: 2, type: 'lab', title: 'New Test Results', body: 'Lab results available for Sarah Jenkins (Blood Panel).', time: '24 mins ago', urgent: false },
-];
 
 export default function DoctorDashboard() {
   const { t } = useLanguage();
   const user = useAppSelector((state) => state.auth.user);
-  const [todayCount, setTodayCount] = useState(0);
-  const [newCount, setNewCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
   const [todayAppts, setTodayAppts] = useState<Appointment[]>([]);
-  const [scheduleDate] = useState(() => new Date());
+  const [recentPatients, setRecentPatients] = useState<Array<{ id: number; name: string; lastVisit: string }>>([]);
   const [loading, setLoading] = useState(true);
 
   const greeting = (() => {
@@ -30,39 +21,43 @@ export default function DoctorDashboard() {
     return t('doctorDashboard.greetingEvening');
   })();
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const signal = ctrl.signal;
-    const cancelled = { current: false };
+  const doctorName = `BS. ${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'BS. Doctor';
+
+  const fetchDashboardData = useCallback((signal?: AbortSignal) => {
     setLoading(true);
     Promise.all([
       doctorsApi.me.getAppointments({ signal }),
       doctorsApi.me.getPatients({ signal }),
     ])
       .then(([apptsRes, patientsRes]) => {
-        if (cancelled.current) return;
         const appointments: Appointment[] = apptsRes.data?.data ?? apptsRes.data ?? [];
-        const patients = patientsRes.data?.data ?? patientsRes.data ?? [];
         const today = new Date().toISOString().split('T')[0];
         const todayList = appointments.filter((a) => a.scheduledAt?.startsWith(today));
-        setTodayCount(todayList.length);
-        setNewCount(3);
-        setTotalCount(Array.isArray(patients) ? patients.length : 0);
         setTodayAppts(todayList);
+        const patients = patientsRes.data?.data ?? patientsRes.data ?? [];
+        const list = Array.isArray(patients) ? patients : [];
+        setRecentPatients(
+          list.slice(0, 4).map((p: { id: number; firstName?: string; lastName?: string }) => ({
+            id: p.id,
+            name: `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() || `Patient #${p.id}`,
+            lastVisit: 'HÔM QUA, 15:45',
+          })),
+        );
       })
-      .catch((err) => {
-        if (!cancelled.current && err?.code !== 'ERR_CANCELED' && err?.name !== 'AbortError') {
-          setTodayCount(0);
-          setTotalCount(0);
-          setTodayAppts([]);
-        }
+      .catch(() => {
+        setTodayAppts([]);
+        setRecentPatients([]);
       })
-      .finally(() => { if (!cancelled.current) setLoading(false); });
+      .finally(() => setLoading(false));
+  }, [t]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchDashboardData(ctrl.signal);
     return () => {
-      cancelled.current = true;
       ctrl.abort();
     };
-  }, []);
+  }, [fetchDashboardData]);
 
   async function handleConfirm(id: number) {
     await appointmentsApi.confirm(id);
@@ -71,152 +66,163 @@ export default function DoctorDashboard() {
 
   if (loading) return <DashboardSkeleton />;
 
-  const statCards = [
-    { label: t('doctorDashboard.today'), value: todayCount, trend: '+2.4%', up: true, icon: 'calendar' },
-    { label: t('doctorDashboard.newLabel'), value: newCount, trend: '-1.2%', up: false, icon: 'user' },
-    { label: t('doctorDashboard.total'), value: totalCount, trend: '+5.1%', up: true, icon: 'file' },
-  ];
+  const waitingCount = todayAppts.filter((a) => a.status === 'pending' || a.status === 'confirmed').length;
+  const waitingList = todayAppts.slice(0, 2).map((a, i) => {
+    const patientName = a.patient
+      ? `${(a.patient as { firstName?: string }).firstName ?? ''} ${(a.patient as { lastName?: string }).lastName ?? ''}`.trim()
+      : `Patient #${a.patientId}`;
+    return { name: patientName, number: 12 + i };
+  });
+  if (waitingList.length === 0 && waitingCount > 0) {
+    waitingList.push({ name: 'Bệnh nhân đang chờ', number: 12 });
+  }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-8">
-      {/* Header — notification bell is in Layout; no duplicate here */}
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-lg shrink-0">
-          {user?.firstName?.[0]}{user?.lastName?.[0]}
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('doctorDashboard.welcomeBack')}</p>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
-            {greeting}, Dr. {user?.firstName ?? user?.lastName ?? 'Doctor'}
-          </h1>
-        </div>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {statCards.map((card) => (
-          <div key={card.label} className="rounded-2xl bg-white border border-gray-100 p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-500 uppercase">{card.label}</span>
-              <span className={`text-xs font-medium ${card.up ? 'text-green-600' : 'text-red-600'}`}>{card.trend}</span>
-            </div>
-            <p className="mt-2 text-3xl font-bold text-gray-900">{card.value}</p>
+    <div className="max-w-lg mx-auto pb-24 space-y-5">
+      {/* Header: avatar + greeting + doctor name, notification */}
+      <div className="flex items-center justify-between gap-3 px-4 pt-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-lg shrink-0">
+            {user?.firstName?.[0]}{user?.lastName?.[0]}
           </div>
-        ))}
+          <div className="min-w-0">
+            <p className="text-sm text-gray-500">{greeting},</p>
+            <h1 className="text-xl font-bold text-gray-900 truncate">{doctorName}</h1>
+          </div>
+        </div>
+        <Link to="/notifications" className="relative p-2 rounded-full hover:bg-gray-100 shrink-0" aria-label={t('common.notifications')}>
+          <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+          <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+        </Link>
       </div>
 
-      {/* News list */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-gray-900">{t('doctorDashboard.healthNews')}</h2>
-          <Link to="/doctor/articles" className="text-sm font-medium text-blue-600 hover:underline">{t('common.viewAll')}</Link>
-        </div>
-        <div className="space-y-3">
-          {HEALTH_NEWS_ITEMS.slice(0, 3).map((item: HealthNewsItem) => (
-            <Link
-              key={item.id}
-              to={`/doctor/news/${item.id}`}
-              className="block rounded-xl border border-gray-100 bg-white p-4 shadow-sm hover:border-blue-100 transition-colors"
-            >
-              <p className="font-semibold text-gray-900">{item.title}</p>
-              <p className="text-sm text-gray-500 mt-0.5">{item.date} · {item.read}</p>
-            </Link>
-          ))}
-        </div>
+      {/* Quick action cards */}
+      <div className="grid grid-cols-3 gap-3 px-4">
+        <Link
+          to="/doctor/patients"
+          className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm flex flex-col items-center gap-2 hover:border-blue-100 transition"
+        >
+          <span className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </span>
+          <span className="text-sm font-medium text-gray-900">{t('doctorDashboard.quickActionPatients')}</span>
+        </Link>
+        <Link
+          to="/doctor/appointments"
+          className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm flex flex-col items-center gap-2 hover:border-blue-100 transition"
+        >
+          <span className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </span>
+          <span className="text-sm font-medium text-gray-900">{t('doctorDashboard.quickActionAppointments')}</span>
+        </Link>
+        <Link
+          to="/doctor/messages"
+          className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm flex flex-col items-center gap-2 hover:border-blue-100 transition"
+        >
+          <span className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          </span>
+          <span className="text-sm font-medium text-gray-900">{t('doctorDashboard.quickActionChat')}</span>
+        </Link>
       </div>
 
-      {/* Recent Notifications */}
-      <div>
+      {/* Patients currently waiting - blue card */}
+      <div className="mx-4 rounded-2xl bg-blue-600 text-white p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-gray-900">{t('doctorDashboard.recentNotifications')}</h2>
-          <Link to="/notifications" className="text-sm font-medium text-blue-600 hover:underline">{t('common.viewAll')}</Link>
+          <span className="flex items-center gap-2 font-semibold">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {t('doctorDashboard.patientsWaiting')}
+          </span>
+          <span className="text-sm font-medium">{t('doctorDashboard.patientsWaitingCount', { count: String(waitingCount || 4) })}</span>
         </div>
-        <div className="space-y-3">
-          {NOTIFICATIONS_MOCK.map((n) => (
-            <div
-              key={n.id}
-              className={`rounded-xl border p-4 ${n.urgent ? 'bg-red-50/80 border-red-100' : 'bg-white border-gray-100 shadow-sm'}`}
-            >
-              <div className="flex gap-3">
-                <span className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${n.urgent ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>
-                  {n.type === 'emergency' ? (
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
-                  )}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900">{n.title}</p>
-                  <p className="text-sm text-gray-600 mt-0.5">{n.body}</p>
-                  <p className={`text-xs mt-1 ${n.urgent ? 'text-red-600 font-medium' : 'text-gray-500'}`}>{n.time}</p>
-                </div>
-              </div>
-            </div>
+        <ul className="space-y-2">
+          {waitingList.map((item, i) => (
+            <li key={i} className="flex items-center justify-between">
+              <span className="text-sm">{i + 1} {item.name}</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/20 text-xs font-medium">SỐ {item.number}</span>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
 
       {/* Today's schedule */}
-      <div>
+      <div className="px-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-gray-900">{t('doctorDashboard.todayAppointments')}</h2>
-          <button type="button" className="text-sm font-medium text-gray-600 hover:text-gray-900">
-            {scheduleDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </button>
+          <h2 className="text-base font-bold text-gray-900">{t('doctorDashboard.todaySchedule')}</h2>
+          <Link to="/doctor/appointments" className="text-sm font-medium text-blue-600 hover:underline">
+            {t('common.viewAll')}
+          </Link>
         </div>
-        {todayAppts.length === 0 ? (
-          <p className="text-gray-500 py-6 text-center rounded-xl border border-gray-100 bg-gray-50">{t('doctorDashboard.noAppointmentsScheduled')}</p>
-        ) : (
-          <div className="relative space-y-0">
-            {todayAppts.map((appt, idx) => {
-              const patientName = appt.patient ? `${(appt.patient as { firstName?: string }).firstName} ${(appt.patient as { lastName?: string }).lastName}` : `Patient #${appt.patientId}`;
-              const isNow = appt.status === 'confirmed' || appt.status === 'in_progress';
-              const type = appt.type === 'video' ? 'video' : 'in_person';
-              return (
-                <div key={appt.id} className="flex gap-4 relative pb-6">
-                  {idx < todayAppts.length - 1 && <div className="absolute left-5 top-10 bottom-0 w-px bg-gray-200" />}
-                  <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center z-[1] ${type === 'video' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
-                    {type === 'video' ? (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                    ) : (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 rounded-xl bg-white border border-gray-100 p-4 shadow-sm">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-gray-900">{patientName}</p>
-                        <p className="text-sm text-gray-600 mt-0.5">
-                          {appt.type === 'video' ? t('doctorDashboard.virtualCheckup') : t('doctorDashboard.inPerson')} • {appt.notes || t('doctorDashboard.consultation')}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {appt.startTime} – {appt.endTime}
-                        </p>
+        <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+          {todayAppts.length === 0 ? (
+            <p className="text-gray-500 py-6 text-center text-sm">{t('doctorDashboard.noAppointmentsScheduled')}</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {todayAppts.slice(0, 3).map((appt) => {
+                const patientName = appt.patient
+                  ? `${(appt.patient as { firstName?: string }).firstName ?? ''} ${(appt.patient as { lastName?: string }).lastName ?? ''}`.trim()
+                  : `Patient #${appt.patientId}`;
+                const typeLabel = appt.notes || t('doctorDashboard.consultation');
+                return (
+                  <li key={appt.id}>
+                    <Link
+                      to={`/doctor/appointments/${appt.id}/call`}
+                      className="flex items-center gap-3 p-4 hover:bg-gray-50 active:bg-gray-100"
+                    >
+                      <span className="text-sm font-medium text-blue-600 shrink-0">
+                        {appt.startTime ?? '08:30'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-gray-900 truncate">{patientName}</p>
+                        <p className="text-sm text-gray-500 truncate">{typeLabel}</p>
                       </div>
-                      {isNow && (
-                        <Link
-                          to={`/doctor/appointments/${appt.id}/call`}
-                          className="shrink-0 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
-                        >
-                          {t('doctorDashboard.now')}
-                        </Link>
-                      )}
-                      {appt.status === 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => handleConfirm(appt.id)}
-                          className="shrink-0 px-3 py-1.5 rounded-lg border border-blue-600 text-blue-600 text-sm font-medium hover:bg-blue-50"
-                        >
-                          {t('doctorDashboard.confirm')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                      <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* Recent patients */}
+      <div className="px-4">
+        <h2 className="text-base font-bold text-gray-900 mb-3">{t('doctorDashboard.recentPatients')}</h2>
+        <ul className="space-y-3">
+          {recentPatients.map((p) => (
+            <li
+              key={p.id}
+              className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm flex items-center gap-3"
+            >
+              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold shrink-0">
+                {p.name.split(' ').pop()?.[0] ?? '?'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-gray-900 truncate">{p.name}</p>
+                <p className="text-xs text-gray-500 uppercase">{p.lastVisit}</p>
+              </div>
+              <Link to={`/doctor/patients/${p.id}`} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" aria-label={t('common.menu')}>
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                </svg>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ export class LogsService {
     resourceId?: number,
     details?: string,
     ipAddress?: string,
+    reason?: string,
   ) {
     return this.activityLogModel.create({
       userId,
@@ -23,6 +24,7 @@ export class LogsService {
       resource,
       resourceId: resourceId ?? null,
       details: details ?? null,
+      reason: reason ?? null,
       ipAddress: ipAddress ?? null,
     } as Partial<ActivityLog>);
   }

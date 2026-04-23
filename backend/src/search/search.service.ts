@@ -21,7 +21,7 @@ export class SearchService {
     @InjectModel(Specialization) private readonly specializationModel: typeof Specialization,
     @InjectModel(Hospital) private readonly hospitalModel: typeof Hospital,
     @InjectModel(DoctorSpecialization) private readonly doctorSpecModel: typeof DoctorSpecialization,
-  ) {}
+  ) { }
 
   async search(q: string, options?: { doctorsLimit?: number; hospitalsLimit?: number }): Promise<SearchResult> {
     const term = (q || '').trim();
@@ -78,16 +78,7 @@ export class SearchService {
     });
   }
 
-  private async searchArticles(term: string): Promise<{ id: string; title: string; category: string; excerpt: string; image?: string }[]> {
-    const lower = term.toLowerCase();
-    const mockArticles = [
-      { id: '1', title: '10 Simple Ways to Keep Your Heart Healthy After 40', category: 'Heart Health', excerpt: 'Learn the best dietary and lifestyle changes to support cardiovascular health.', image: undefined },
-      { id: '2', title: 'Understanding the Link Between Cardio and Longevity', category: 'Exercise', excerpt: 'Recent studies suggest that moderate cardio can improve longevity.', image: undefined },
-      { id: '3', title: 'When to See a Cardiologist', category: 'Heart Health', excerpt: 'Signs and symptoms that warrant a specialist visit.', image: undefined },
-      { id: '4', title: 'Managing Blood Pressure at Home', category: 'Heart Health', excerpt: 'Tips for monitoring and managing your blood pressure.', image: undefined },
-    ];
-    return mockArticles.filter(
-      (a) => a.title.toLowerCase().includes(lower) || a.category.toLowerCase().includes(lower) || a.excerpt.toLowerCase().includes(lower),
-    );
+  private async searchArticles(_term: string): Promise<{ id: string; title: string; category: string; excerpt: string; image?: string }[]> {
+    return [];
   }
 }
